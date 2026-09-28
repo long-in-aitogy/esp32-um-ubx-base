@@ -163,14 +163,6 @@ cmd_action_t handleEspCommand(const std::vector<String> &cmdWords) {
     }
 
     if (cmdWords[0] == "SET" && cmd_helper::hasExactArgumentCount(cmdWords, 4, "ESP SET")) {
-        if (cmdWords[1] == "GNSS" && cmdWords[2] == "TX") {
-            Serial.println("[MQTT COMMAND DOWNLINK] Lenh yeu cau cau hinh GNSS TX");
-            return cmd_helper::saveIntPreference("GNSS_TX", cmdWords[3].toInt());
-        }
-        if (cmdWords[1] == "GNSS" && cmdWords[2] == "RX") {
-            Serial.println("[MQTT COMMAND DOWNLINK] Lenh yeu cau cau hinh GNSS RX");
-            return cmd_helper::saveIntPreference("GNSS_RX", cmdWords[3].toInt());
-        }
         if (cmdWords[1] == "WIFI" && cmdWords[2] == "SSID") {
             Serial.println("[MQTT COMMAND DOWNLINK] Lenh yeu cau cau hinh WIFI SSID");
             return cmd_helper::saveStringPreference("WIFI_SSID", cmdWords[3]);
