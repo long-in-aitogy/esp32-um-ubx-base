@@ -28,9 +28,12 @@ Hai mẫu chính của loại này:
 - Mountpoint: `/test`
 
 - Nối chân cắm UART từ ESP32 đến module GNSS:
-
-  - IO18 (ESP32) → RX/RX1/MOSI (GNSS)
-  - IO19 (ESP32) ← TX/TX1/MISO (GNSS)
+    - Với UM980:
+        - IO18 (ESP32) → RX0/RX (COM1 trên mạch GNSS)
+        - IO19 (ESP32) ← TX0/TX (COM1 trên mạch GNSS)
+    - Với U-Blox ZED F6P:
+        - IO18 (ESP32) → RX/RX1/MOSI (GNSS)
+        - IO19 (ESP32) ← TX/TX1/MISO (GNSS)
 
 ## Quá trình hoạt động
 
