@@ -78,10 +78,10 @@ void setup()
     }
 
     loadConnectionTypeFromPrefs();
-    int gnssTX = prefs.getInt("GNSS_TX", TX_GNSS);
-    int gnssRX = prefs.getInt("GNSS_RX", RX_GNSS);
-    int rx2ModemTX = prefs.getInt("RX_TO_MODEM_TX", RX_TO_MODEM_TX);
-    int tx2ModemRX = prefs.getInt("TX_TO_MODEM_RX", TX_TO_MODEM_RX);
+    const int gnssTX = TX_GNSS;
+    const int gnssRX = RX_GNSS;
+    const int rx2ModemTX = RX_TO_MODEM_TX;
+    const int tx2ModemRX = TX_TO_MODEM_RX;
     prefs.end();
 
     // Khởi tạo giao tiếp với UM980
@@ -393,11 +393,6 @@ void initPrefs() {
     prefs.clear();
     prefs.putBool("NEED_RESET", false);
     prefs.putInt("RSTRT_COUNT", 0); // chưa cấu hình được, lấy được
-    prefs.putUChar("TX_TO_MODEM_RX", 17); // chưa cấu hình được, lấy được
-    prefs.putUChar("RX_TO_MODEM_TX", 16); // chưa cấu hình được, lấy được
-    prefs.putUChar("MODEM_DC_PIN", 15); // chưa cấu hình đc, chưa lấy đc
-    prefs.putUChar("MODEM_DTR_PIN", 4); // chưa cấu hình đc, chưa lấy đc
-
     prefs.putString("CONNECTION_TYPE", "4G");
     // Hai giá trị hợp lệ: "4G" và "WIFI". Giá trị này được nạp khi khởi động.
 
@@ -406,9 +401,6 @@ void initPrefs() {
     prefs.putString("WIFI_PASS", WIFI_PASSWORD); // cấu hình đc, lấy đc
     prefs.putString("GPRS_USER", ""); // cấu hình đc, chưa lấy đc
     prefs.putString("GPRS_PASS", ""); // cấu hình đc, chưa lấy đc
-    prefs.putInt("GNSS_RX", RX_GNSS); // cấu hình được, lấy được
-    prefs.putInt("GNSS_TX", TX_GNSS); // cấu hình được, lấy được
-
     prefs.putString("NTRIP_SERVER", NTRIP_CASTER_IP); // cấu hình được, lấy được
     prefs.putUShort("NTRIP_PORT", NTRIP_CASTER_PORT); // cấu hình được, lấy được
     prefs.putString("NTRIP_MPT", NTRIP_MOUNTPOINT); // cấu hình được, lấy được
