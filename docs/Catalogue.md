@@ -27,13 +27,28 @@ Hai mẫu chính của loại này:
 - NTRIP caster: `aitogy.com.vn`, cổng `2101`
 - Mountpoint: `/test`
 
-- Nối chân cắm UART từ ESP32 đến module GNSS ***(Không thay đổi được)***:
+- Nối chân cắm UART từ ESP32 đến module GNSS ***(Thông tin nội bộ + Không thay đổi được)***:
     - Với UM980:
         - IO18 (ESP32) → RX0/RX (COM1 trên mạch GNSS)
         - IO19 (ESP32) ← TX0/TX (COM1 trên mạch GNSS)
     - Với U-Blox ZED F6P:
         - IO18 (ESP32) → RX/RX1/MOSI (GNSS)
         - IO19 (ESP32) ← TX/TX1/MISO (GNSS)
+
+### Macro để lựa chọn các đoạn mã được biên dịch trong firmware:
+
+Các đoạn mã được lựa chọn dựa trên loại thiết bị GNSS được sử dụng (UM980 hoặc U-Blox ZED F6P). Các macro này được định nghĩa trong file `include/Top_Lvl_Config.h`:
+
+```cpp
+// Định nghĩa macro đại diện cho số hiệu của từng loại module GNSS:
+#define GNSS_MODULE_TYPE_UBLOX 0
+#define GNSS_MODULE_TYPE_UNICORE 1
+
+// Định nghĩa macro GNSS_MODULE_TYPE để lựa chọn loại module GNSS đang sử dụng. Nếu không định nghĩa, mặc định sẽ là GNSS_MODULE_TYPE_UBLOX.
+#ifndef GNSS_MODULE_TYPE
+#define GNSS_MODULE_TYPE GNSS_MODULE_TYPE_UBLOX // Chọn giữa GNSS_MODULE_TYPE_UBLOX hoặc GNSS_MODULE_TYPE_UNICORE
+#endif
+```
 
 ### **\[Lưu hành nội bộ\]** Cấu hình trong mã nguồn firmware (`include/Prog_Config.h`):
 
