@@ -27,13 +27,103 @@ Hai mẫu chính của loại này:
 - NTRIP caster: `aitogy.com.vn`, cổng `2101`
 - Mountpoint: `/test`
 
-- Nối chân cắm UART từ ESP32 đến module GNSS:
+- Nối chân cắm UART từ ESP32 đến module GNSS ***(Thông tin nội bộ + Không thay đổi được)***:
     - Với UM980:
         - IO18 (ESP32) → RX0/RX (COM1 trên mạch GNSS)
         - IO19 (ESP32) ← TX0/TX (COM1 trên mạch GNSS)
     - Với U-Blox ZED F6P:
         - IO18 (ESP32) → RX/RX1/MOSI (GNSS)
         - IO19 (ESP32) ← TX/TX1/MISO (GNSS)
+
+### Macro để lựa chọn các đoạn mã được biên dịch trong firmware:
+
+Các đoạn mã được lựa chọn dựa trên loại thiết bị GNSS được sử dụng (UM980 hoặc U-Blox ZED F6P). Các macro này được định nghĩa trong file `include/Top_Lvl_Config.h`:
+
+```cpp
+// Định nghĩa macro đại diện cho số hiệu của từng loại module GNSS:
+#define GNSS_MODULE_TYPE_UBLOX 0
+#define GNSS_MODULE_TYPE_UNICORE 1
+
+// Định nghĩa macro GNSS_MODULE_TYPE để lựa chọn loại module GNSS đang sử dụng. Nếu không định nghĩa, mặc định sẽ là GNSS_MODULE_TYPE_UBLOX.
+#ifndef GNSS_MODULE_TYPE
+#define GNSS_MODULE_TYPE GNSS_MODULE_TYPE_UBLOX // Chọn giữa GNSS_MODULE_TYPE_UBLOX hoặc GNSS_MODULE_TYPE_UNICORE
+#endif
+```
+
+### **\[Lưu hành nội bộ\]** Cấu hình trong mã nguồn firmware (`include/Prog_Config.h`):
+
+Một số cấu hình mặc định sau có thể thay đổi trong mã nguồn firmware trước khi biên dịch và nạp vào ESP32, không thể thay đổi trong quá trình chạy:
+
+```cpp
+// ============ Cấu hình Wi-Fi ==============
+
+// Tên mạng Wi-Fi (SSID) mà ESP32 sẽ kết nối khi ở chế độ Wi-Fi:
+inline constexpr char WIFI_SSID[] = "*******";
+// Mật khẩu mạng Wi-Fi:
+inline constexpr char WIFI_PASSWORD[] = "*******";
+
+// ============ Cấu hình 4G ==============
+
+// Tên người dùng 4G:
+inline constexpr char GPRS_USER[] = "";     // Thường để trống
+// Mật khẩu 4G:
+inline constexpr char GPRS_PASS[] = "";     // Thường để trống
+
+// ============ Cấu hình hệ thống ==============
+
+// Cổng nhận tín hiệu GNSS - Nối với TXD trên GNSS:
+inline constexpr int RX_GNSS = 18;
+// Cổng phát lệnh đến GNSS - Nối với RXD trên GNSS:
+inline constexpr int TX_GNSS = 19;
+// Chân nối đèn led, tùy theo module esp32, hoặc cách đấu nối led ngoài:
+inline constexpr int LED_PIN = 2;
+
+// Chân nối ESP32 với module modem 4G:
+// Chân TX của ESP32 nối với chân RX của modem 4G:
+inline constexpr uint8_t TX_TO_MODEM_RX = 17;
+// Chân RX của ESP32 nối với chân TX của modem 4G:
+inline constexpr uint8_t RX_TO_MODEM_TX = 16;
+// Chân nối ESP32 với chân DC (kích nguồn) của modem 4G:
+inline constexpr uint8_t MODEM_DC_PIN = 15;
+// Chân nối ESP32 với chân DTR của modem 4G:
+inline constexpr uint8_t MODEM_DTR_PIN = 4;
+
+// Thời gian tối đa để chờ mutex (ms):
+inline constexpr int MUTEX_TIMEOUT_MS = 1500;
+
+// ================= CẤU HÌNH NTRIP =================
+
+// Chế độ NTRIP (Tạm thời không sử dụng và sẽ giữ nguyên tới khi có quyết định mới):
+inline constexpr int NTRIP_MODE = 1;
+// Địa chỉ của NTRIP caster (có thể là tên miền hoặc địa chỉ IP):
+inline constexpr char NTRIP_CASTER_ADDRESS[] = "aitogy.com.vn";
+// Cổng của NTRIP caster (số nguyên 1024–65535), thường là 2101:
+inline constexpr uint16_t NTRIP_CASTER_PORT = 2101;
+// Mã xác thực NTRIP cho base station (password nguyên văn không mã hóa):
+inline constexpr char NTRIP_AUTH_BASE_STATION[] = "*****"; // Không tiết lộ
+// Mountpoint của NTRIP:
+inline constexpr char NTRIP_MOUNTPOINT[] = "/test";
+
+// ================= CẤU HÌNH MQTT =================
+
+// Địa chỉ của MQTT broker (có thể là tên miền hoặc địa chỉ IP):
+inline constexpr char MQTT_SERVER[] = "aitogy.asia";
+// Cổng của MQTT broker (số nguyên 1024–65535), thường là 1883:
+inline constexpr uint16_t MQTT_PORT = 1883;
+// Tên người dùng đăng nhập MQTT:
+inline constexpr char MQTT_USER[] = "mqttUser";
+// Mật khẩu đăng nhập MQTT:
+inline constexpr char MQTT_PASS[] = "********"; // Không tiết lộ
+// Topic mà ESP subscribe để nhận lệnh ATG qua MQTT:
+inline constexpr char TOPIC_SUB_CMD[] = "tdm2402/um980_base_001/cmd";
+// Topic mà ESP publish dữ liệu health check qua MQTT:
+inline constexpr char TOPIC_PUB_HEALTH[] = "tdm2402/um980_base_001/health";
+
+// ================= CẤU HÌNH KIỂM TRA SỨC KHOẺ =================
+
+// Chu kỳ gửi thông tin sức khoẻ (ms):
+const unsigned long HEALTH_INTERVAL = 30000; 
+```
 
 ## Quá trình hoạt động
 
@@ -112,8 +202,6 @@ Các lệnh này cấu hình module GNSS ở chế độ base và được gửi
 | `ATG ESP RESTART` | Khởi động lại ESP32 ngay lập tức. |
 | `ATG ESP SET CONNECTION 4G` | Chuyển phương thức kết nối mạng sang 4G và khởi động lại ESP32 để áp dụng. |
 | `ATG ESP SET CONNECTION WIFI` | Chuyển phương thức kết nối mạng sang Wi-Fi và khởi động lại ESP32 để áp dụng. |
-| `ATG ESP SET GNSS TX <GPIO>` | Lưu chân GPIO truyền UART từ ESP32 đến GNSS. Ví dụ: `ATG ESP SET GNSS TX 17`. Không nên tự ý thay đổi cấu hình này, trừ khi là bên lập trình, sản xuất thiết bị. |
-| `ATG ESP SET GNSS RX <GPIO>` | Lưu chân GPIO nhận UART từ GNSS về ESP32. Ví dụ: `ATG ESP SET GNSS RX 16`. Không nên tự ý thay đổi cấu hình này, trừ khi là bên lập trình, sản xuất thiết bị. |
 | `ATG ESP SET WIFI SSID <ssid>` | Lưu tên mạng Wi-Fi cần kết nối. |
 | `ATG ESP SET WIFI PASS <mật_khẩu>` | Lưu mật khẩu mạng Wi-Fi. |
 | `ATG ESP SET 4G APN <apn>` | Lưu APN của nhà mạng 4G. Ví dụ: `ATG ESP SET 4G APN v-internet`. |
@@ -295,4 +383,3 @@ Loại bản tin bao gồm RTCM1005, 1074, 1077, 1084, 1087, 1094, 1097, 1124, 1
 ```text
 RTCM1005 COM1 1
 ```
-
