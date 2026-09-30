@@ -98,6 +98,47 @@ Các cấu hình sau được khai báo dưới dạng hằng số inline trong 
 
 Ở trên là các cấu hình mặc định, nếu không thể đọc cấu hình từ bộ nhớ flash được triển khai bằng Preferences (NVS), chương trình sẽ sử dụng các giá trị mặc định này. Các cấu hình này có thể được thay đổi bằng cách gửi lệnh qua MQTT (xem phần dưới).
 
+## Quá trình hoạt động
+
+Tùy theo điều kiện mạng, ESP32 sẽ mất khoảng 15 đến 20 giây để khởi động, kết nối mạng 4G, đăng nhập MQTT broker và NTRIP caster. Khi kết nối và đăng nhập thành công, ESP32 sẽ lấy dữ liệu RTCM từ module GNSS và gửi lên NTRIP caster, đồng thời gửi một bản sao của bản tin này lên một topic MQTT.
+
+Để thông báo trạng thái sức khỏe thiết bị, mỗi 30 giây ESP32 sẽ gửi một bản tin health check lên topic MQTT đã cấu hình. Bản tin này có định dạng JSON như sau:
+
+```json
+{
+    "uptime_s": 123456,
+    "free_heap_bytes": 123456,
+    "connected_via": "GSM",
+    "rssi_dbm": "-77",
+    "mqtt_ok": true,
+    "ntrip_ok": true,
+    "gnss_data_ok": true,
+    "rtcm_types": {
+        "1005": 12,
+        "1074": 8,
+        "1077": 10,
+        "1084": 0,
+        "1087": 0,
+        "1094": 0,
+        "1097": 0,
+        "1124": 0,
+        "1127": 0,
+        "1230": 0
+    }
+}
+```
+
+## Định dạng bản tin Health Check:
+
+- `uptime_s`: thời gian hoạt động của ESP32, tính bằng giây. Sẽ reset về 0 khi ESP32 khởi động lại.
+- `free_heap_bytes`: dung lượng RAM còn trống, tính bằng byte.
+- `connected_via`: phương thức kết nối mạng hiện tại, có thể là `GSM` hoặc `WIFI`.
+- `rssi_dbm`: cường độ tín hiệu mạng hiện tại, tính bằng dBm.
+- `mqtt_ok`: trạng thái kết nối MQTT, `true` nếu đang kết nối, `false` nếu không.
+- `ntrip_ok`: trạng thái kết nối NTRIP, `true` nếu đang kết nối, `false` nếu không.
+- `gnss_data_ok`: trạng thái dữ liệu GNSS, `true` nếu đang nhận dữ liệu RTCM từ module GNSS, `false` nếu không.
+- `rtcm_types`: object chứa số lần xuất hiện của từng loại bản tin RTCM trong khoảng 30 giây gần nhất, tương ứng với một chu kỳ health check. Firmware hiện theo dõi các loại `1005`, `1074`, `1077`, `1084`, `1087`, `1094`, `1097`, `1124`, `1127` và `1230`. Giá trị bằng `0` nếu loại bản tin không xuất hiện trong chu kỳ hiện tại.
+
 ## Gửi lệnh qua MQTT hoặc Serial Monitor:
 
 Thiết bị nhận nội dung (payload) từ Serial (nếu kết nối serial với máy tính hoặc điện thoại) hoặc qua topic lệnh MQTT đã cấu hình. Mỗi lệnh phải bắt đầu bằng `ATG`; các thành phần được ngăn cách bằng khoảng trắng. Từ khóa phân biệt chữ hoa/chữ thường. Giá trị không được chứa khoảng trắng (ví dụ mật khẩu có khoảng trắng hiện chưa được hỗ trợ).
