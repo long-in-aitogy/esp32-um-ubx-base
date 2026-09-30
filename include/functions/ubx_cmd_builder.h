@@ -43,6 +43,8 @@ namespace UbxCmdBuilder
     CommandList buildBaseFixedLlaCommand(double lat, double lon,
                                          double alt, float accuracy,
                                          const GnssOptions &options = {});
+    CommandList buildBaseRtcmOutputCommand(const String &message,
+                                           const String &port);
     CommandList buildGeotekLteUnicoreConfig(const String &setupMethod, uint32_t duration = 60,
                                             double lat = 0, double lon = 0, double alt = 0);
     Command commandListToBytes(const CommandList &commands);

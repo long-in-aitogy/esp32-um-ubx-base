@@ -68,6 +68,11 @@ namespace UbxCmdBuilder
         return port == "UART1" || port == "UART2" || port == "USB";
     }
 
+    inline bool isValidUnicorePort(const String &port)
+    {
+        return port == "COM1" || port == "COM2" || port == "COM3";
+    }
+
     uint32_t keyForPort(const PortKeys &keys, const String &port)
     {
         if (port == "UART1")
@@ -419,6 +424,45 @@ namespace UbxCmdBuilder
             commands.push_back(asciiCommand("saveconfig\r\n"));
         // }
         #endif
+        return commands;
+    }
+
+    CommandList buildBaseRtcmOutputCommand(const String &message, const String &port)
+    {
+        String normalizedMessage = message;
+        String normalizedPort = port;
+        normalizedMessage.trim();
+        normalizedMessage.toUpperCase();
+        normalizedPort.trim();
+        normalizedPort.toUpperCase();
+
+        CommandList commands;
+#if GNSS_MODULE_TYPE == 0
+        if (!isValidPort(normalizedPort))
+            return commands;
+
+        for (const auto &rtcm : RTCM_KEYS)
+        {
+            if (normalizedMessage == rtcm.name)
+            {
+                commands.push_back(ubxCfgValsetU1({
+                    {keyForPort(rtcm.keys, normalizedPort), true}
+                }));
+                commands.emplace_back(std::begin(UBLOX_SAVE_CONFIG), std::end(UBLOX_SAVE_CONFIG));
+                return commands;
+            }
+        }
+#elif GNSS_MODULE_TYPE == 1
+        if (isValidUnicorePort(normalizedPort) && normalizedMessage.length() == 4)
+        {
+            for (uint8_t i = 0; i < normalizedMessage.length(); ++i)
+                if (!isDigit(normalizedMessage[i]))
+                    return commands;
+
+            commands.push_back(asciiCommand("rtcm" + normalizedMessage + " " + normalizedPort + " 1\r\n"));
+            commands.push_back(asciiCommand("saveconfig\r\n"));
+        }
+#endif
         return commands;
     }
 

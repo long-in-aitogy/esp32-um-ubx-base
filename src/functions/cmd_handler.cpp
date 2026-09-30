@@ -132,6 +132,17 @@ cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
         Serial.println("[MQTT COMMAND DOWNLINK] Da gui lenh cau hinh GNSS BASE FIXED LLA.");
 
         return CMD_ACTION_NONE;
+    } else if (cmdWords.size() == 2) {
+        Serial.println("[MQTT COMMAND DOWNLINK] Lenh yeu cau bat RTCM " + cmdWords[0] +
+                       " tren cong " + cmdWords[1]);
+        commands = UbxCmdBuilder::buildBaseRtcmOutputCommand(cmdWords[0], cmdWords[1]);
+        if (commands.empty()) {
+            Serial.println("[MQTT COMMAND DOWNLINK] LOI - RTCM message hoac cong khong hop le.");
+            return CMD_ACTION_NONE;
+        }
+        cmd_helper::sendGnssCommands(commands);
+        Serial.println("[MQTT COMMAND DOWNLINK] Da gui lenh bat RTCM.");
+        return CMD_ACTION_NONE;
     } else {
         Serial.println("[MQTT COMMAND DOWNLINK] LOI - Lenh khong kha dung: " + cmdWords[0]);
         return CMD_ACTION_NONE;
@@ -163,14 +174,6 @@ cmd_action_t handleEspCommand(const std::vector<String> &cmdWords) {
     }
 
     if (cmdWords[0] == "SET" && cmd_helper::hasExactArgumentCount(cmdWords, 4, "ESP SET")) {
-        if (cmdWords[1] == "GNSS" && cmdWords[2] == "TX") {
-            Serial.println("[MQTT COMMAND DOWNLINK] Lenh yeu cau cau hinh GNSS TX");
-            return cmd_helper::saveIntPreference("GNSS_TX", cmdWords[3].toInt());
-        }
-        if (cmdWords[1] == "GNSS" && cmdWords[2] == "RX") {
-            Serial.println("[MQTT COMMAND DOWNLINK] Lenh yeu cau cau hinh GNSS RX");
-            return cmd_helper::saveIntPreference("GNSS_RX", cmdWords[3].toInt());
-        }
         if (cmdWords[1] == "WIFI" && cmdWords[2] == "SSID") {
             Serial.println("[MQTT COMMAND DOWNLINK] Lenh yeu cau cau hinh WIFI SSID");
             return cmd_helper::saveStringPreference("WIFI_SSID", cmdWords[3]);

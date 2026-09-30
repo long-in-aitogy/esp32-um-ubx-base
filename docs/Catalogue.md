@@ -103,6 +103,7 @@ Các lệnh này cấu hình module GNSS ở chế độ base và được gửi
 | `ATG GNSS BASE SURVEY_IN <thời_gian> <độ_chính_xác>` | Bật chế độ khảo sát vị trí base. `<thời_gian>` là thời gian khảo sát tối thiểu, tính bằng giây; `<độ_chính_xác>` là ngưỡng độ chính xác, tính bằng mét. Ví dụ: `ATG GNSS BASE SURVEY_IN 300 1.0`. |
 | `ATG GNSS BASE FIXED <vĩ_độ> <kinh_độ> <độ_cao> <độ_chính_xác>` | Cấu hình vị trí base cố định theo LLA. Vĩ độ và kinh độ ở đơn vị độ thập phân, độ cao và độ chính xác ở mét. Ví dụ: `ATG GNSS BASE FIXED 10.7769 106.7009 12.5 0.5`. |
 | `ATG GNSS BASE <RTCM_MSG_TYPE> <PORT>` | Bật loại bản tin RTCM trên cổng GNSS chỉ định. Với Unicore dùng `COM1`, `COM2` hoặc `COM3`; với UBlox dùng `UART1`, `UART2` hoặc `USB`. Ví dụ: `ATG GNSS BASE 1074 COM2`. |
+| `ATG GNSS BASE <RTCM_MSG_TYPE> <PORT>` | Bật loại bản tin RTCM trên cổng GNSS chỉ định. Với Unicore dùng `COM1`, `COM2` hoặc `COM3`; với UBlox dùng `UART1`, `UART2` hoặc `USB`. Ví dụ: `ATG GNSS BASE 1074 COM2`. |
 
 ### Cấu hình liên quan tới chính module ESP
 
