@@ -401,7 +401,7 @@ void initPrefs() {
     prefs.putString("WIFI_PASS", WIFI_PASSWORD); // cấu hình đc, lấy đc
     prefs.putString("GPRS_USER", ""); // cấu hình đc, chưa lấy đc
     prefs.putString("GPRS_PASS", ""); // cấu hình đc, chưa lấy đc
-    prefs.putString("NTRIP_SERVER", NTRIP_CASTER_IP); // cấu hình được, lấy được
+    prefs.putString("NTRIP_SERVER", NTRIP_CASTER_ADDRESS); // cấu hình được, lấy được
     prefs.putUShort("NTRIP_PORT", NTRIP_CASTER_PORT); // cấu hình được, lấy được
     prefs.putString("NTRIP_MPT", NTRIP_MOUNTPOINT); // cấu hình được, lấy được
     prefs.putString("NT_AUTH_BS", NTRIP_AUTH_BASE_STATION); // cấu hình được, lấy được

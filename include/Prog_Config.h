@@ -18,8 +18,7 @@ inline constexpr int TX_GNSS = 23; // Nối RXD (Hàng dưới) của UM980
 inline constexpr int LED_PIN = 2;
 #elif BOARD_TDM_240X
 inline constexpr int RX_GNSS = 18; // Nối TXD (Hàng dưới) của UM980
-inline constexpr int TX_GNSS = 19
-; // Nối RXD (Hàng dưới) của UM980
+inline constexpr int TX_GNSS = 19; // Nối RXD (Hàng dưới) của UM980
 inline constexpr int LED_PIN = 2;
 #endif
 inline constexpr int GNSS_BAUD = 115200;
@@ -44,22 +43,11 @@ inline constexpr char GPRS_PASS[] = "";
 
 // ================= CẤU HÌNH NTRIP =================
 inline constexpr int NTRIP_MODE = 1; // 1: Chỉ gửi GGA khi có yêu cầu; 2: Gửi GGA mỗi khi có thay đổi; 3: Gửi GGA đều đặn mỗi 10s
-
-#if RTCM_COMMUNICATION_PROTOCOL == TCP_IP
-inline constexpr char NTRIP_CASTER_IP[] = "aitogy.com.vn";
+inline constexpr char NTRIP_CASTER_ADDRESS[] = "aitogy.com.vn";
 inline constexpr uint16_t NTRIP_CASTER_PORT = 2101;
-#endif
-
-#if defined(PROGRAM_TEST) || defined(PROGRAM_DEBUG)
 inline constexpr char NTRIP_MOUNTPOINT[] = "/test";
 // inline constexpr char NTRIP_AUTH[] = "YWl0b2d5OmFpdG9neQ==";
 inline constexpr char NTRIP_AUTH_BASE_STATION[] = "12345";
-#else
-inline constexpr char NTRIP_MOUNTPOINT[] = "/test";
-// Base64 của "trung:12345"
-// inline constexpr char NTRIP_AUTH[] = "dHJ1bmc6MTIzNDU=";
-inline constexpr char NTRIP_AUTH_BASE_STATION[] = "12345";
-#endif
 
 // ================ CẤU HÌNH MQTT =================
 

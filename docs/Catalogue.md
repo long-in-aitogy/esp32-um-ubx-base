@@ -27,13 +27,57 @@ Hai mẫu chính của loại này:
 - NTRIP caster: `aitogy.com.vn`, cổng `2101`
 - Mountpoint: `/test`
 
-- Nối chân cắm UART từ ESP32 đến module GNSS:
+- Nối chân cắm UART từ ESP32 đến module GNSS ***(Không thay đổi được)***:
     - Với UM980:
         - IO18 (ESP32) → RX0/RX (COM1 trên mạch GNSS)
         - IO19 (ESP32) ← TX0/TX (COM1 trên mạch GNSS)
     - Với U-Blox ZED F6P:
         - IO18 (ESP32) → RX/RX1/MOSI (GNSS)
         - IO19 (ESP32) ← TX/TX1/MISO (GNSS)
+
+### **\[Lưu hành nội bộ\]** Cấu hình trong mã nguồn firmware (`include/Prog_Config.h`):
+
+Một số cấu hình mặc định sau có thể thay đổi trong mã nguồn firmware trước khi biên dịch và nạp vào ESP32, không thể thay đổi trong quá trình chạy:
+
+```cpp
+// Cổng nhận tín hiệu GNSS - Nối với TXD trên GNSS:
+inline constexpr int RX_GNSS = 18;
+// Cổng phát lệnh đến GNSS - Nối với RXD trên GNSS:
+inline constexpr int TX_GNSS = 19;
+// Chân nối đèn led, tùy theo module esp32, hoặc cách đấu nối led ngoài:
+inline constexpr int LED_PIN = 2;
+
+// Thời gian tối đa để chờ mutex (ms):
+inline constexpr int MUTEX_TIMEOUT_MS = 1500;
+
+// ================= CẤU HÌNH NTRIP =================
+
+// Chế độ NTRIP (Tạm thời không sử dụng và sẽ giữ nguyên tới khi có quyết định mới):
+inline constexpr int NTRIP_MODE = 1;
+// Địa chỉ của NTRIP caster (có thể là tên miền hoặc địa chỉ IP):
+inline constexpr char NTRIP_CASTER_ADDRESS[] = "aitogy.com.vn";
+// Cổng của NTRIP caster (số nguyên 1024–65535), thường là 2101:
+inline constexpr uint16_t NTRIP_CASTER_PORT = 2101;
+// Mã xác thực NTRIP cho base station (password nguyên văn không mã hóa):
+inline constexpr char NTRIP_AUTH_BASE_STATION[] = "*****"; // Không tiết lộ
+// Mountpoint của NTRIP:
+inline constexpr char NTRIP_MOUNTPOINT[] = "/test";
+
+// ================= CẤU HÌNH MQTT =================
+
+// Địa chỉ của MQTT broker (có thể là tên miền hoặc địa chỉ IP):
+inline constexpr char MQTT_SERVER[] = "aitogy.asia";
+// Cổng của MQTT broker (số nguyên 1024–65535), thường là 1883:
+inline constexpr uint16_t MQTT_PORT = 1883;
+// Tên người dùng đăng nhập MQTT:
+inline constexpr char MQTT_USER[] = "mqttUser";
+// Mật khẩu đăng nhập MQTT:
+inline constexpr char MQTT_PASS[] = "********"; // Không tiết lộ
+// Topic mà ESP subscribe để nhận lệnh ATG qua MQTT:
+inline constexpr char TOPIC_SUB_CMD[] = "tdm2402/um980_base_001/cmd";
+// Topic mà ESP publish dữ liệu health check qua MQTT:
+inline constexpr char TOPIC_PUB_HEALTH[] = "tdm2402/um980_base_001/health";
+```
 
 ## Quá trình hoạt động
 
