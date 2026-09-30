@@ -40,12 +40,38 @@ Hai mẫu chính của loại này:
 Một số cấu hình mặc định sau có thể thay đổi trong mã nguồn firmware trước khi biên dịch và nạp vào ESP32, không thể thay đổi trong quá trình chạy:
 
 ```cpp
+// ============ Cấu hình Wi-Fi ==============
+
+// Tên mạng Wi-Fi (SSID) mà ESP32 sẽ kết nối khi ở chế độ Wi-Fi:
+inline constexpr char WIFI_SSID[] = "*******";
+// Mật khẩu mạng Wi-Fi:
+inline constexpr char WIFI_PASSWORD[] = "*******";
+
+// ============ Cấu hình 4G ==============
+
+// Tên người dùng 4G:
+inline constexpr char GPRS_USER[] = "";     // Thường để trống
+// Mật khẩu 4G:
+inline constexpr char GPRS_PASS[] = "";     // Thường để trống
+
+// ============ Cấu hình hệ thống ==============
+
 // Cổng nhận tín hiệu GNSS - Nối với TXD trên GNSS:
 inline constexpr int RX_GNSS = 18;
 // Cổng phát lệnh đến GNSS - Nối với RXD trên GNSS:
 inline constexpr int TX_GNSS = 19;
 // Chân nối đèn led, tùy theo module esp32, hoặc cách đấu nối led ngoài:
 inline constexpr int LED_PIN = 2;
+
+// Chân nối ESP32 với module modem 4G:
+// Chân TX của ESP32 nối với chân RX của modem 4G:
+inline constexpr uint8_t TX_TO_MODEM_RX = 17;
+// Chân RX của ESP32 nối với chân TX của modem 4G:
+inline constexpr uint8_t RX_TO_MODEM_TX = 16;
+// Chân nối ESP32 với chân DC (kích nguồn) của modem 4G:
+inline constexpr uint8_t MODEM_DC_PIN = 15;
+// Chân nối ESP32 với chân DTR của modem 4G:
+inline constexpr uint8_t MODEM_DTR_PIN = 4;
 
 // Thời gian tối đa để chờ mutex (ms):
 inline constexpr int MUTEX_TIMEOUT_MS = 1500;
@@ -77,6 +103,11 @@ inline constexpr char MQTT_PASS[] = "********"; // Không tiết lộ
 inline constexpr char TOPIC_SUB_CMD[] = "tdm2402/um980_base_001/cmd";
 // Topic mà ESP publish dữ liệu health check qua MQTT:
 inline constexpr char TOPIC_PUB_HEALTH[] = "tdm2402/um980_base_001/health";
+
+// ================= CẤU HÌNH KIỂM TRA SỨC KHOẺ =================
+
+// Chu kỳ gửi thông tin sức khoẻ (ms):
+const unsigned long HEALTH_INTERVAL = 30000; 
 ```
 
 ## Quá trình hoạt động
