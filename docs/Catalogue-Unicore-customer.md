@@ -1,10 +1,6 @@
 # Hướng dẫn sử dụng thiết bị Base GNSS qua 4G và Wi-Fi AITOGY-BASE-ESP
 
-Tên thiết bị: AITOGY-GNSS-BASE-ESP
-
-Hai mẫu chính của loại này:
-- AITOGY-GNSS-BASE-ESP-UBX
-- AITOGY-GNSS-BASE-ESP-UM980
+Tên thiết bị: **AITOGY-GNSS-BASE-ESP-UM980**
 
 ## Các loại thiết bị được sử dụng:
 
@@ -12,9 +8,7 @@ Hai mẫu chính của loại này:
     - Chip ESP32-WROOM-32E (Xử lý chính, kết nối WiFi)
     - Chip SIMCOM A7600C (Kết nối 4G)
 
-- Module GNSS (Nhận dữ liệu GNSS, xuất dữ liệu RTCM qua UART):
-    - Unicore UM980 (với mẫu AITOGY-BASESP-UM)
-    - Hoặc U-Blox ZED F6P (với mẫu AITOGY-BASESP-UBX)
+- Module GNSS (Nhận dữ liệu GNSS, xuất dữ liệu RTCM qua UART): Unicore UM980 (với mẫu AITOGY-BASESP-UM)
 
 ## Cấu hình mặc định
 
@@ -26,104 +20,6 @@ Hai mẫu chính của loại này:
 - MQTT topic được ESP subscribe để nhận lệnh: `tdm2402/um980_base_001/cmd`
 - NTRIP caster: `aitogy.com.vn`, cổng `2101`
 - Mountpoint: `/test`
-
-- Nối chân cắm UART từ ESP32 đến module GNSS ***(Thông tin nội bộ + Không thay đổi được)***:
-    - Với UM980:
-        - IO18 (ESP32) → RX0/RX (COM1 trên mạch GNSS)
-        - IO19 (ESP32) ← TX0/TX (COM1 trên mạch GNSS)
-    - Với U-Blox ZED F6P:
-        - IO18 (ESP32) → RX/RX1/MOSI (GNSS)
-        - IO19 (ESP32) ← TX/TX1/MISO (GNSS)
-
-### Macro để lựa chọn các đoạn mã được biên dịch trong firmware:
-
-Các đoạn mã được lựa chọn dựa trên loại thiết bị GNSS được sử dụng (UM980 hoặc U-Blox ZED F6P). Các macro này được định nghĩa trong file `include/Top_Lvl_Config.h`:
-
-```cpp
-// Định nghĩa macro đại diện cho số hiệu của từng loại module GNSS:
-#define GNSS_MODULE_TYPE_UBLOX 0
-#define GNSS_MODULE_TYPE_UNICORE 1
-
-// Định nghĩa macro GNSS_MODULE_TYPE để lựa chọn loại module GNSS đang sử dụng. Nếu không định nghĩa, mặc định sẽ là GNSS_MODULE_TYPE_UBLOX.
-#ifndef GNSS_MODULE_TYPE
-#define GNSS_MODULE_TYPE GNSS_MODULE_TYPE_UBLOX // Chọn giữa GNSS_MODULE_TYPE_UBLOX hoặc GNSS_MODULE_TYPE_UNICORE
-#endif
-```
-
-### **\[Lưu hành nội bộ\]** Cấu hình trong mã nguồn firmware (`include/Prog_Config.h`):
-
-Một số cấu hình mặc định sau có thể thay đổi trong mã nguồn firmware trước khi biên dịch và nạp vào ESP32, không thể thay đổi trong quá trình chạy:
-
-```cpp
-// ============ Cấu hình Wi-Fi ==============
-
-// Tên mạng Wi-Fi (SSID) mà ESP32 sẽ kết nối khi ở chế độ Wi-Fi:
-inline constexpr char WIFI_SSID[] = "*******";
-// Mật khẩu mạng Wi-Fi:
-inline constexpr char WIFI_PASSWORD[] = "*******";
-
-// ============ Cấu hình 4G ==============
-
-// Tên người dùng 4G:
-inline constexpr char GPRS_USER[] = "";     // Thường để trống
-// Mật khẩu 4G:
-inline constexpr char GPRS_PASS[] = "";     // Thường để trống
-
-// ============ Cấu hình hệ thống ==============
-
-// Cổng nhận tín hiệu GNSS - Nối với TXD trên GNSS:
-inline constexpr int RX_GNSS = 18;
-// Cổng phát lệnh đến GNSS - Nối với RXD trên GNSS:
-inline constexpr int TX_GNSS = 19;
-// Chân nối đèn led, tùy theo module esp32, hoặc cách đấu nối led ngoài:
-inline constexpr int LED_PIN = 2;
-
-// Chân nối ESP32 với module modem 4G:
-// Chân TX của ESP32 nối với chân RX của modem 4G:
-inline constexpr uint8_t TX_TO_MODEM_RX = 17;
-// Chân RX của ESP32 nối với chân TX của modem 4G:
-inline constexpr uint8_t RX_TO_MODEM_TX = 16;
-// Chân nối ESP32 với chân DC (kích nguồn) của modem 4G:
-inline constexpr uint8_t MODEM_DC_PIN = 15;
-// Chân nối ESP32 với chân DTR của modem 4G:
-inline constexpr uint8_t MODEM_DTR_PIN = 4;
-
-// Thời gian tối đa để chờ mutex (ms):
-inline constexpr int MUTEX_TIMEOUT_MS = 1500;
-
-// ================= CẤU HÌNH NTRIP =================
-
-// Chế độ NTRIP (Tạm thời không sử dụng và sẽ giữ nguyên tới khi có quyết định mới):
-inline constexpr int NTRIP_MODE = 1;
-// Địa chỉ của NTRIP caster (có thể là tên miền hoặc địa chỉ IP):
-inline constexpr char NTRIP_CASTER_ADDRESS[] = "aitogy.com.vn";
-// Cổng của NTRIP caster (số nguyên 1024–65535), thường là 2101:
-inline constexpr uint16_t NTRIP_CASTER_PORT = 2101;
-// Mã xác thực NTRIP cho base station (password nguyên văn không mã hóa):
-inline constexpr char NTRIP_AUTH_BASE_STATION[] = "*****"; // Không tiết lộ
-// Mountpoint của NTRIP:
-inline constexpr char NTRIP_MOUNTPOINT[] = "/test";
-
-// ================= CẤU HÌNH MQTT =================
-
-// Địa chỉ của MQTT broker (có thể là tên miền hoặc địa chỉ IP):
-inline constexpr char MQTT_SERVER[] = "aitogy.asia";
-// Cổng của MQTT broker (số nguyên 1024–65535), thường là 1883:
-inline constexpr uint16_t MQTT_PORT = 1883;
-// Tên người dùng đăng nhập MQTT:
-inline constexpr char MQTT_USER[] = "mqttUser";
-// Mật khẩu đăng nhập MQTT:
-inline constexpr char MQTT_PASS[] = "********"; // Không tiết lộ
-// Topic mà ESP subscribe để nhận lệnh ATG qua MQTT:
-inline constexpr char TOPIC_SUB_CMD[] = "tdm2402/um980_base_001/cmd";
-// Topic mà ESP publish dữ liệu health check qua MQTT:
-inline constexpr char TOPIC_PUB_HEALTH[] = "tdm2402/um980_base_001/health";
-
-// ================= CẤU HÌNH KIỂM TRA SỨC KHOẺ =================
-
-// Chu kỳ gửi thông tin sức khoẻ (ms):
-const unsigned long HEALTH_INTERVAL = 30000; 
-```
 
 ## Quá trình hoạt động
 
@@ -238,78 +134,11 @@ Các lệnh này cấu hình module GNSS ở chế độ base và được gửi
 
 ## Cấu hình trực tiếp mạch GNSS
 
-Trong một số trường hợp xảy ra lỗi (chẳng hạn lệch baud rate giữa ESP32 và GNSS), người dùng có thể cấu hình trực tiếp module GNSS bằng cách cắm serial USB vào module GNSS và sử dụng phần mềm u-center (đối với u-blox), hoặc gửi lệnh trực tiếp qua các phần mềm Serial Terminal (đối với UM98x). Các lệnh cấu hình GNSS được gửi theo định dạng văn bản thuần (với UM98x) hoặc UBX (với module GNSS của UBlox).
+Trong một số trường hợp xảy ra lỗi (chẳng hạn lệch baud rate giữa ESP32 và GNSS), người dùng có thể cấu hình trực tiếp module GNSS bằng cách cắm serial USB vào module GNSS và gửi lệnh trực tiếp qua các phần mềm Serial Terminal (đối với UM98x). Các lệnh cấu hình GNSS được gửi theo định dạng văn bản thuần.
 
-### U-Blox (u-center)
-
-Người dùng có thể tải và cài đặt u-center từ [trang này](https://www.u-blox.com/en/product/u-center). Chọn U-Center (không phải U-Center 2).
-
-Sau khi cài đặt, mở u-center, chọn đúng cổng COM nối với module GNSS để kết nối.
-
-![Hình minh họa giao diện u-center](imgs/ublox/1.jpg)
-
-Có thể chọn ***Receiver > Autobauding*** để tự động dò tốc độ baud rate của module GNSS. Sau khi kết nối thành công, người dùng có thể gửi các lệnh UBX để cấu hình module GNSS.
-
-![Cài đặt autobauding](imgs/ublox/2.jpg)
-
-#### Xem trực tiếp các bản tin được sinh ra từ module GNSS
-
-Chỉ xem được nếu module GNSS đang xuất dữ liệu ra cổng COM USB. Chọn ***View > Packet Console*** để mở cửa sổ xem các bản tin UBX, NMEA và RTCM được sinh ra từ module GNSS.
-
-![Mở view](imgs/ublox/3.jpg)
-
-Packet Console sẽ hiển thị thông tin về các bản tin được sinh ra từ module GNSS, nhưng không phải nội dung bên trong. 
-
-![Packet Console](imgs/ublox/4.jpg)
-
-Để xem nội dung bên trong, chọn ***View > Message View***. Tuy nhiên, các bản tin RTCM không phải dạng plain text đọc được.
-
-#### Cài đặt baud rate cho từng cổng của module U-Blox
-
-Mở ***View > Configuration View***.
-
-![Mở menu Configuration View](imgs/ublox/5.jpg)
-
-Trong ***Configuration View***, chọn mục ***PRT*** để cấu hình các cổng của module GNSS. Chọn cổng cần cấu hình (UART1, UART2, USB hoặc SPI). Thay đổi tốc độ baud rate và nhấn ***Send*** để gửi lệnh cấu hình đến module GNSS.
-
-![Cấu hình cổng (PRT)](imgs/ublox/6.jpg)
-
-Trong hệ thống hiện tại, UM980 được nối với ESP32 qua cổng UART1, do đó cần chọn đúng cổng này để cấu hình tốc độ baud.
-
-#### Điều chỉnh chế độ base station cho module U-Blox
-
-Vẫn trong ***Configuration View***, chọn tab ***TMODE3*** để cấu hình chế độ base station.
-
-Ở mục ***Mode***, chọn chế độ base station. Có thể chọn chế độ survey-in hoặc fixed position. Nếu chọn survey-in, cần nhập thời gian khảo sát tối thiểu và ngưỡng độ chính xác (khoảng cách sai lệch tối đa).
-
-![Cấu hình chế độ Survey-in](imgs/ublox/7.jpg)
-
-Nếu chọn fixed position, cần nhập tọa độ, gồm: vĩ độ, kinh độ và độ cao.
-
-Nhấn ***Send*** để gửi lệnh cấu hình đến module GNSS.
-
-#### Cấu hình các bản tin RTCM xuất ra từng cổng của module U-Blox
-
-Vẫn trong ***Configuration View***, chọn tab ***MSG*** để cấu hình các bản tin xuất ra từng cổng. Chọn loại bản tin RTCM cần xuất, đánh dấu các cổng (UART1, UART2, USB hoặc SPI) để xuất bản tin. Sau đó, nhấn ***Send*** để gửi lệnh cấu hình đến module GNSS.
-
-![Hình minh họa cấu hình bản tin RTCM](imgs/ublox/8.jpg)
-
-Các bản tin có thể cấu hình cho base station bao gồm:
-- F5-05: RTCM 1005
-- F5-4A: RTCM 1074
-- F5-4D: RTCM 1077
-- F5-54: RTCM 1084
-- F5-57: RTCM 1087
-- F5-5E: RTCM 1094
-- F5-61: RTCM 1097
-- F5-7C: RTCM 1124
-- F5-7F: RTCM 1127
-- F5-E6: RTCM 1230
-
-### Unicore UM98x
 Người dùng có thể gửi lệnh trực tiếp qua Serial Terminal (ví dụ ***PuTTY***, ***Serial Debug Assistant***, Extension ***Serial Monitor*** của ***VSCode***, v.v.) với tốc độ baud mặc định là 38400 hoặc 115200. Các lệnh cấu hình module UM98x được gửi theo định dạng văn bản thuần (ASCII) và không phân biệt chữ hoa/chữ thường. Mỗi lệnh phải kết thúc bằng ký tự xuống dòng (LF hoặc CRLF).
 
-#### Các cấu hình chung thường dùng
+### Các cấu hình chung thường dùng
 
 Hủy toàn bộ log ra các cổng:
 
@@ -329,7 +158,7 @@ Xóa các cấu hình đã lưu và khôi phục về mặc định:
 FRESET
 ```
 
-#### Cấu hình baud rate cho module GNSS
+### Cấu hình baud rate cho module GNSS
 
 Để thay đổi tốc độ baud rate của module UM98x, người dùng gửi lệnh sau:
 
@@ -339,7 +168,7 @@ CONFIG <TÊN CỔNG> <TỐC_ĐỘ_BAUD>
 
 UM980 có 3 cổng ra là `COM1`, `COM2` và `COM3`. Trong đó, `COM3` thường được các module nối ra dưới dạng cổng cắm Type-C, trong khi `COM1` và `COM2` là các cổng UART nối ra các chân GPIO của module. Tốc độ baud có thể là 9600, 19200, 38400, 57600, 115200, 230400, 460800 hoặc 921600.
 
-#### Cấu hình chức năng base station GNSS
+### Cấu hình chức năng base station GNSS
 
 Để cấu hình module UM98x hoạt động ở chế độ base station và tự xác định vị trí ở chế độ survey-in, người dùng gửi lệnh sau:
 
@@ -369,7 +198,7 @@ Kinh độ, vĩ độ và độ cao có thể theo định dạng GCS (hệ th�
 MODE BASE 10.7769 106.7009 12.5
 ```
 
-#### Cấu hình các bản tin RTCM xuất ra từng cổng
+### Cấu hình các bản tin RTCM xuất ra từng cổng
 
 Người dùng có thể cấu hình module UM98x xuất các bản tin RTCM ra từng cổng COM1, COM2 và COM3. Mỗi cổng có thể xuất ra nhiều loại bản tin RTCM khác nhau. Cấu hình được thực hiện bằng lệnh sau:
 
