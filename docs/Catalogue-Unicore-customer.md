@@ -1,10 +1,6 @@
 # Hướng dẫn sử dụng thiết bị Base GNSS qua 4G và Wi-Fi AITOGY-BASE-ESP
 
-Tên thiết bị: AITOGY-GNSS-BASE-ESP
-
-Hai mẫu chính của loại này:
-- AITOGY-GNSS-BASE-ESP-UBX
-- AITOGY-GNSS-BASE-ESP-UM980
+Tên thiết bị: **AITOGY-GNSS-BASE-ESP-UM980**
 
 ## Các loại thiết bị được sử dụng:
 
@@ -12,9 +8,7 @@ Hai mẫu chính của loại này:
     - Chip ESP32-WROOM-32E (Xử lý chính, kết nối WiFi)
     - Chip SIMCOM A7600C (Kết nối 4G)
 
-- Module GNSS (Nhận dữ liệu GNSS, xuất dữ liệu RTCM qua UART):
-    - Unicore UM980 (với mẫu AITOGY-BASESP-UM)
-    - Hoặc U-Blox ZED F6P (với mẫu AITOGY-BASESP-UBX)
+- Module GNSS (Nhận dữ liệu GNSS, xuất dữ liệu RTCM qua UART): Unicore UM980 (với mẫu AITOGY-BASESP-UM)
 
 ## Cấu hình mặc định
 
@@ -26,14 +20,6 @@ Hai mẫu chính của loại này:
 - MQTT topic được ESP subscribe để nhận lệnh: `tdm2402/um980_base_001/cmd`
 - NTRIP caster: `aitogy.com.vn`, cổng `2101`
 - Mountpoint: `/test`
-
-- Nối chân cắm UART từ ESP32 đến module GNSS:
-    - Với UM980:
-        - IO18 (ESP32) → RX0/RX (COM1 trên mạch GNSS)
-        - IO19 (ESP32) ← TX0/TX (COM1 trên mạch GNSS)
-    - Với U-Blox ZED F6P:
-        - IO18 (ESP32) → RX/RX1/MOSI (GNSS)
-        - IO19 (ESP32) ← TX/TX1/MISO (GNSS)
 
 ## Quá trình hoạt động
 
@@ -112,8 +98,6 @@ Các lệnh này cấu hình module GNSS ở chế độ base và được gửi
 | `ATG ESP RESTART` | Khởi động lại ESP32 ngay lập tức. |
 | `ATG ESP SET CONNECTION 4G` | Chuyển phương thức kết nối mạng sang 4G và khởi động lại ESP32 để áp dụng. |
 | `ATG ESP SET CONNECTION WIFI` | Chuyển phương thức kết nối mạng sang Wi-Fi và khởi động lại ESP32 để áp dụng. |
-| `ATG ESP SET GNSS TX <GPIO>` | Lưu chân GPIO truyền UART từ ESP32 đến GNSS. Ví dụ: `ATG ESP SET GNSS TX 17`. Không nên tự ý thay đổi cấu hình này, trừ khi là bên lập trình, sản xuất thiết bị. |
-| `ATG ESP SET GNSS RX <GPIO>` | Lưu chân GPIO nhận UART từ GNSS về ESP32. Ví dụ: `ATG ESP SET GNSS RX 16`. Không nên tự ý thay đổi cấu hình này, trừ khi là bên lập trình, sản xuất thiết bị. |
 | `ATG ESP SET WIFI SSID <ssid>` | Lưu tên mạng Wi-Fi cần kết nối. |
 | `ATG ESP SET WIFI PASS <mật_khẩu>` | Lưu mật khẩu mạng Wi-Fi. |
 | `ATG ESP SET 4G APN <apn>` | Lưu APN của nhà mạng 4G. Ví dụ: `ATG ESP SET 4G APN v-internet`. |
@@ -150,78 +134,11 @@ Các lệnh này cấu hình module GNSS ở chế độ base và được gửi
 
 ## Cấu hình trực tiếp mạch GNSS
 
-Trong một số trường hợp xảy ra lỗi (chẳng hạn lệch baud rate giữa ESP32 và GNSS), người dùng có thể cấu hình trực tiếp module GNSS bằng cách cắm serial USB vào module GNSS và sử dụng phần mềm u-center (đối với u-blox), hoặc gửi lệnh trực tiếp qua các phần mềm Serial Terminal (đối với UM98x). Các lệnh cấu hình GNSS được gửi theo định dạng văn bản thuần (với UM98x) hoặc UBX (với module GNSS của UBlox).
+Trong một số trường hợp xảy ra lỗi (chẳng hạn lệch baud rate giữa ESP32 và GNSS), người dùng có thể cấu hình trực tiếp module GNSS bằng cách cắm serial USB vào module GNSS và gửi lệnh trực tiếp qua các phần mềm Serial Terminal (đối với UM98x). Các lệnh cấu hình GNSS được gửi theo định dạng văn bản thuần.
 
-### U-Blox (u-center)
-
-Người dùng có thể tải và cài đặt u-center từ [trang này](https://www.u-blox.com/en/product/u-center). Chọn U-Center (không phải U-Center 2).
-
-Sau khi cài đặt, mở u-center, chọn đúng cổng COM nối với module GNSS để kết nối.
-
-![Hình minh họa giao diện u-center](imgs/ublox/1.jpg)
-
-Có thể chọn ***Receiver > Autobauding*** để tự động dò tốc độ baud rate của module GNSS. Sau khi kết nối thành công, người dùng có thể gửi các lệnh UBX để cấu hình module GNSS.
-
-![Cài đặt autobauding](imgs/ublox/2.jpg)
-
-#### Xem trực tiếp các bản tin được sinh ra từ module GNSS
-
-Chỉ xem được nếu module GNSS đang xuất dữ liệu ra cổng COM USB. Chọn ***View > Packet Console*** để mở cửa sổ xem các bản tin UBX, NMEA và RTCM được sinh ra từ module GNSS.
-
-![Mở view](imgs/ublox/3.jpg)
-
-Packet Console sẽ hiển thị thông tin về các bản tin được sinh ra từ module GNSS, nhưng không phải nội dung bên trong. 
-
-![Packet Console](imgs/ublox/4.jpg)
-
-Để xem nội dung bên trong, chọn ***View > Message View***. Tuy nhiên, các bản tin RTCM không phải dạng plain text đọc được.
-
-#### Cài đặt baud rate cho từng cổng của module U-Blox
-
-Mở ***View > Configuration View***.
-
-![Mở menu Configuration View](imgs/ublox/5.jpg)
-
-Trong ***Configuration View***, chọn mục ***PRT*** để cấu hình các cổng của module GNSS. Chọn cổng cần cấu hình (UART1, UART2, USB hoặc SPI). Thay đổi tốc độ baud rate và nhấn ***Send*** để gửi lệnh cấu hình đến module GNSS.
-
-![Cấu hình cổng (PRT)](imgs/ublox/6.jpg)
-
-Trong hệ thống hiện tại, UM980 được nối với ESP32 qua cổng UART1, do đó cần chọn đúng cổng này để cấu hình tốc độ baud.
-
-#### Điều chỉnh chế độ base station cho module U-Blox
-
-Vẫn trong ***Configuration View***, chọn tab ***TMODE3*** để cấu hình chế độ base station.
-
-Ở mục ***Mode***, chọn chế độ base station. Có thể chọn chế độ survey-in hoặc fixed position. Nếu chọn survey-in, cần nhập thời gian khảo sát tối thiểu và ngưỡng độ chính xác (khoảng cách sai lệch tối đa).
-
-![Cấu hình chế độ Survey-in](imgs/ublox/7.jpg)
-
-Nếu chọn fixed position, cần nhập tọa độ, gồm: vĩ độ, kinh độ và độ cao.
-
-Nhấn ***Send*** để gửi lệnh cấu hình đến module GNSS.
-
-#### Cấu hình các bản tin RTCM xuất ra từng cổng của module U-Blox
-
-Vẫn trong ***Configuration View***, chọn tab ***MSG*** để cấu hình các bản tin xuất ra từng cổng. Chọn loại bản tin RTCM cần xuất, đánh dấu các cổng (UART1, UART2, USB hoặc SPI) để xuất bản tin. Sau đó, nhấn ***Send*** để gửi lệnh cấu hình đến module GNSS.
-
-![Hình minh họa cấu hình bản tin RTCM](imgs/ublox/8.jpg)
-
-Các bản tin có thể cấu hình cho base station bao gồm:
-- F5-05: RTCM 1005
-- F5-4A: RTCM 1074
-- F5-4D: RTCM 1077
-- F5-54: RTCM 1084
-- F5-57: RTCM 1087
-- F5-5E: RTCM 1094
-- F5-61: RTCM 1097
-- F5-7C: RTCM 1124
-- F5-7F: RTCM 1127
-- F5-E6: RTCM 1230
-
-### Unicore UM98x
 Người dùng có thể gửi lệnh trực tiếp qua Serial Terminal (ví dụ ***PuTTY***, ***Serial Debug Assistant***, Extension ***Serial Monitor*** của ***VSCode***, v.v.) với tốc độ baud mặc định là 38400 hoặc 115200. Các lệnh cấu hình module UM98x được gửi theo định dạng văn bản thuần (ASCII) và không phân biệt chữ hoa/chữ thường. Mỗi lệnh phải kết thúc bằng ký tự xuống dòng (LF hoặc CRLF).
 
-#### Các cấu hình chung thường dùng
+### Các cấu hình chung thường dùng
 
 Hủy toàn bộ log ra các cổng:
 
@@ -241,7 +158,7 @@ Xóa các cấu hình đã lưu và khôi phục về mặc định:
 FRESET
 ```
 
-#### Cấu hình baud rate cho module GNSS
+### Cấu hình baud rate cho module GNSS
 
 Để thay đổi tốc độ baud rate của module UM98x, người dùng gửi lệnh sau:
 
@@ -251,7 +168,7 @@ CONFIG <TÊN CỔNG> <TỐC_ĐỘ_BAUD>
 
 UM980 có 3 cổng ra là `COM1`, `COM2` và `COM3`. Trong đó, `COM3` thường được các module nối ra dưới dạng cổng cắm Type-C, trong khi `COM1` và `COM2` là các cổng UART nối ra các chân GPIO của module. Tốc độ baud có thể là 9600, 19200, 38400, 57600, 115200, 230400, 460800 hoặc 921600.
 
-#### Cấu hình chức năng base station GNSS
+### Cấu hình chức năng base station GNSS
 
 Để cấu hình module UM98x hoạt động ở chế độ base station và tự xác định vị trí ở chế độ survey-in, người dùng gửi lệnh sau:
 
@@ -281,7 +198,7 @@ Kinh độ, vĩ độ và độ cao có thể theo định dạng GCS (hệ th�
 MODE BASE 10.7769 106.7009 12.5
 ```
 
-#### Cấu hình các bản tin RTCM xuất ra từng cổng
+### Cấu hình các bản tin RTCM xuất ra từng cổng
 
 Người dùng có thể cấu hình module UM98x xuất các bản tin RTCM ra từng cổng COM1, COM2 và COM3. Mỗi cổng có thể xuất ra nhiều loại bản tin RTCM khác nhau. Cấu hình được thực hiện bằng lệnh sau:
 
@@ -295,4 +212,3 @@ Loại bản tin bao gồm RTCM1005, 1074, 1077, 1084, 1087, 1094, 1097, 1124, 1
 ```text
 RTCM1005 COM1 1
 ```
-
