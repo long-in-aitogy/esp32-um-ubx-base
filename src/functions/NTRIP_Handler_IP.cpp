@@ -1,4 +1,3 @@
-#if RTCM_COMMUNICATION_PROTOCOL == TCP_IP || defined(UNIT_TEST)
 #define NTRIP_HANDLER_IP_CODE
 
 #include "functions/NTRIP_Handler_IP.h"
@@ -253,7 +252,7 @@ bool isNtripConnected() {
 int connectNTRIP() { 
   Client& ntripClient = activeNtripClient();
   prefs.begin("myPrefs", true);
-  String ntripAddr = prefs.getString("NTRIP_SERVER", String(NTRIP_CASTER_IP));
+  String ntripAddr = prefs.getString("NTRIP_SERVER", String(NTRIP_CASTER_ADDRESS));
   String ntripAuth = prefs.getString("NT_AUTH_BS", String(NTRIP_AUTH_BASE_STATION));
   uint16_t ntripPort = prefs.getUShort("NTRIP_PORT", NTRIP_CASTER_PORT);
   String ntripMountpoint = prefs.getString("NTRIP_MPT", String(NTRIP_MOUNTPOINT));
@@ -344,4 +343,3 @@ int loopNTRIP(String& rtcmData) {
   #endif
   return returnCode;
 }
-#endif // NTRIP_HANDLER_IP_CODE

@@ -35,9 +35,7 @@ SemaphoreHandle_t tcpStreamMutex = nullptr;
 
 void initPrefs();
 static void serviceMqtt(const bool reconnect);
-#if RTCM_COMMUNICATION_PROTOCOL == TCP_IP
 static void settleModemBeforeNtrip();
-#endif
 
 __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void* const parameter);
 __attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void* const parameter);
@@ -78,10 +76,10 @@ void setup()
     }
 
     loadConnectionTypeFromPrefs();
-    int gnssTX = prefs.getInt("GNSS_TX", TX_GNSS);
-    int gnssRX = prefs.getInt("GNSS_RX", RX_GNSS);
-    int rx2ModemTX = prefs.getInt("RX_TO_MODEM_TX", RX_TO_MODEM_TX);
-    int tx2ModemRX = prefs.getInt("TX_TO_MODEM_RX", TX_TO_MODEM_RX);
+    const int gnssTX = TX_GNSS;
+    const int gnssRX = RX_GNSS;
+    const int rx2ModemTX = RX_TO_MODEM_TX;
+    const int tx2ModemRX = TX_TO_MODEM_RX;
     prefs.end();
 
     // Khởi tạo giao tiếp với UM980
@@ -124,14 +122,12 @@ void setup()
         }
         if (networkConnected) {
             Serial.println("[SETUP] Ket noi mang thanh cong!");
-            #if RTCM_COMMUNICATION_PROTOCOL == TCP_IP
             setupNTRIP();
             deviceHealth::ntripDisconnectCount = 0;
             if (isGsmConnection()) {
                 settleModemBeforeNtrip();
             }
             connectNTRIP();
-            #endif
             deviceHealth::mqttDisconnectCount = 0;
             setupMQTT();
         } else {
@@ -150,14 +146,12 @@ void setup()
     }
     Serial.println("[SETUP] Tao mutex rtcmDataMutex thanh cong!");
 
-    #if RTCM_COMMUNICATION_PROTOCOL == TCP_IP
     tcpStreamMutex = xSemaphoreCreateMutex();
     while (tcpStreamMutex == nullptr) {
         Serial.println("[ERROR] Tao mutex tcpStreamMutex that bai! Dang thu lai...");
         tcpStreamMutex = xSemaphoreCreateMutex();
     }
     Serial.println("[SETUP] Tao mutex tcpStreamMutex thanh cong!");
-    #endif
 
     Serial.println("[SETUP] Task MQTT: Quan ly ket noi MQTT va callback.");
     xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", 4096, nullptr, 3, nullptr, 1);
@@ -259,7 +253,6 @@ __attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void* const para
     while (true) {
         loopStartTime = millis();
         int32_t signalQualityDbm = -1;
-        #if RTCM_COMMUNICATION_PROTOCOL == TCP_IP
         if (xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)))
         {
             if (isGsmConnection()) {
@@ -276,17 +269,6 @@ __attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void* const para
                                                    messageCounts.values);
             xSemaphoreGive(rtcmBufferMutex);
         }
-        #else
-            if (xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
-                const bool gnssDataOk = rtcmState->hasGnssReception
-                    && millis() - rtcmState->lastGnssReceptionMs <= GNSS_DATA_TIMEOUT_MS;
-                const RtcmMessageCounts messageCounts = rtcmState->messageCounts;
-                rtcmState->messageCounts = {};
-                xSemaphoreGive(rtcmBufferMutex);
-                healthPayload = formDeviceHealthString(signalQualityDbm, gnssDataOk,
-                                                       messageCounts.values);
-            }
-        #endif
         vTaskDelay(1);
         Serial.print("[HEALTH CHECK] ");
         Serial.println(healthPayload);
@@ -374,7 +356,6 @@ void loop() {
     vTaskDelay(pdMS_TO_TICKS(1000)); // loop trống, tất cả logic đã được xử lý trong các task
 }
 
-#if RTCM_COMMUNICATION_PROTOCOL == TCP_IP
 static void settleModemBeforeNtrip() {
     Serial.println("[SETUP][NTRIP] Cho modem on dinh truoc khi bat tay NTRIP...");
     const uint32_t settleStart = millis();
@@ -387,17 +368,11 @@ static void settleModemBeforeNtrip() {
 
     Serial.println("[SETUP][NTRIP] Modem da on dinh, bat dau ket noi NTRIP.");
 }
-#endif
 
 void initPrefs() {
     prefs.clear();
     prefs.putBool("NEED_RESET", false);
     prefs.putInt("RSTRT_COUNT", 0); // chưa cấu hình được, lấy được
-    prefs.putUChar("TX_TO_MODEM_RX", 17); // chưa cấu hình được, lấy được
-    prefs.putUChar("RX_TO_MODEM_TX", 16); // chưa cấu hình được, lấy được
-    prefs.putUChar("MODEM_DC_PIN", 15); // chưa cấu hình đc, chưa lấy đc
-    prefs.putUChar("MODEM_DTR_PIN", 4); // chưa cấu hình đc, chưa lấy đc
-
     prefs.putString("CONNECTION_TYPE", "4G");
     // Hai giá trị hợp lệ: "4G" và "WIFI". Giá trị này được nạp khi khởi động.
 
@@ -406,10 +381,7 @@ void initPrefs() {
     prefs.putString("WIFI_PASS", WIFI_PASSWORD); // cấu hình đc, lấy đc
     prefs.putString("GPRS_USER", ""); // cấu hình đc, chưa lấy đc
     prefs.putString("GPRS_PASS", ""); // cấu hình đc, chưa lấy đc
-    prefs.putInt("GNSS_RX", RX_GNSS); // cấu hình được, lấy được
-    prefs.putInt("GNSS_TX", TX_GNSS); // cấu hình được, lấy được
-
-    prefs.putString("NTRIP_SERVER", NTRIP_CASTER_IP); // cấu hình được, lấy được
+    prefs.putString("NTRIP_SERVER", NTRIP_CASTER_ADDRESS); // cấu hình được, lấy được
     prefs.putUShort("NTRIP_PORT", NTRIP_CASTER_PORT); // cấu hình được, lấy được
     prefs.putString("NTRIP_MPT", NTRIP_MOUNTPOINT); // cấu hình được, lấy được
     prefs.putString("NT_AUTH_BS", NTRIP_AUTH_BASE_STATION); // cấu hình được, lấy được
