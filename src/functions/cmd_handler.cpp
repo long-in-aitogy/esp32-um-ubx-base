@@ -98,6 +98,10 @@ std::vector<String> splitCommand(const String &command) {
 cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
     UbxCmdBuilder::GnssOptions options;
     UbxCmdBuilder::CommandList commands;
+    prefs.begin("myPrefs", true);
+    const UbxCmdBuilder::GnssSensorType sensorType =
+        UbxCmdBuilder::sensorTypeFromString(prefs.getString("GNSS_SENSOR_TYPE", "UBLOX"));
+    prefs.end();
 
     if (cmdWords.empty()) {
         Serial.println("[MQTT COMMAND DOWNLINK] Error: Lenh GNSS BASE khong day du.");
@@ -112,7 +116,7 @@ cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
         uint32_t duration = cmdWords[1].toInt();
         float accuracy = cmdWords[2].toFloat();
         
-        commands = UbxCmdBuilder::buildBaseSurveyInCommand(duration, accuracy, options);
+        commands = UbxCmdBuilder::buildBaseSurveyInCommand(duration, accuracy, sensorType, options);
         cmd_helper::sendGnssCommands(commands);
         Serial.println("[MQTT COMMAND DOWNLINK] Da gui lenh cau hinh GNSS BASE SURVEY_IN.");
 
@@ -127,7 +131,7 @@ cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
         double alt = cmdWords[3].toDouble();
         float accuracy = cmdWords[4].toFloat();
 
-        commands = UbxCmdBuilder::buildBaseFixedLlaCommand(lat, lon, alt, accuracy, options);
+        commands = UbxCmdBuilder::buildBaseFixedLlaCommand(lat, lon, alt, accuracy, sensorType, options);
         cmd_helper::sendGnssCommands(commands);
         Serial.println("[MQTT COMMAND DOWNLINK] Da gui lenh cau hinh GNSS BASE FIXED LLA.");
 
@@ -142,7 +146,7 @@ cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
         const bool enabled = action == "ON";
         Serial.println("[MQTT COMMAND DOWNLINK] Lenh yeu cau " + action + " RTCM " + cmdWords[0] +
                        " tren cong " + cmdWords[1]);
-        commands = UbxCmdBuilder::buildBaseRtcmOutputCommand(cmdWords[0], cmdWords[1], enabled);
+        commands = UbxCmdBuilder::buildBaseRtcmOutputCommand(cmdWords[0], cmdWords[1], enabled, sensorType);
         if (commands.empty()) {
             Serial.println("[MQTT COMMAND DOWNLINK] LOI - RTCM message hoac cong khong hop le.");
             return CMD_ACTION_NONE;
@@ -154,6 +158,29 @@ cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
         Serial.println("[MQTT COMMAND DOWNLINK] LOI - Lenh khong kha dung: " + cmdWords[0]);
         return CMD_ACTION_NONE;
     }
+}
+
+cmd_action_t handleGnssSetCommand(const std::vector<String> &cmdWords) {
+    if (!cmd_helper::hasExactArgumentCount(cmdWords, 3, "GNSS SET")) {
+        return CMD_ACTION_NONE;
+    }
+
+    if (cmdWords[1] != "CHIP") {
+        Serial.println("[MQTT COMMAND DOWNLINK] LOI - Lenh GNSS SET khong kha dung.");
+        return CMD_ACTION_NONE;
+    }
+
+    String sensorType = cmdWords[2];
+    sensorType.toUpperCase();
+    if (sensorType != "UBLOX" && sensorType != "UNICORE") {
+        Serial.println("[MQTT COMMAND DOWNLINK] LOI - Chip GNSS phai la UBLOX hoac UNICORE.");
+        return CMD_ACTION_NONE;
+    }
+
+    cmd_helper::saveStringPreference("GNSS_SENSOR_TYPE", sensorType);
+    Serial.println("[MQTT COMMAND DOWNLINK] Da chuyen chip GNSS sang " + sensorType +
+                   ", dang khoi dong lai ESP32...");
+    return CMD_ACTION_ESP_RESTART;
 }
 
 cmd_action_t handleEspCommand(const std::vector<String> &cmdWords) {
@@ -259,6 +286,10 @@ cmd_action_t handleCommand(std::vector<String> &cmdWords) {
         if (cmdWords[2] == "BASE") {
             cmdWords.erase(cmdWords.begin(), cmdWords.begin() + 3);
             return handleGnssBaseCommand(cmdWords);
+        }
+        if (cmdWords[2] == "SET") {
+            cmdWords.erase(cmdWords.begin(), cmdWords.begin() + 2);
+            return handleGnssSetCommand(cmdWords);
         }
         Serial.println("[MQTT COMMAND DOWNLINK] Error: Unknown GNSS command: " + cmdWords[2]);
         return CMD_ACTION_NONE;
