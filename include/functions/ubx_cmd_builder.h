@@ -4,13 +4,18 @@
 #include <Arduino.h>
 #include <cstdint>
 #include <vector>
-#include "Top_Lvl_Config.h"
 
 namespace UbxCmdBuilder
 {
 
     using Command = std::vector<uint8_t>;
     using CommandList = std::vector<Command>;
+
+    enum class GnssSensorType
+    {
+        Ublox,
+        Unicore
+    };
 
     enum class OutputMode
     {
@@ -38,14 +43,18 @@ namespace UbxCmdBuilder
     };
 
     GnssOptions normalizeGnssOptions(GnssOptions options = {});
+        GnssSensorType sensorTypeFromString(const String &sensorType);
     Command buildUbloxOutputConfigCommand(const GnssOptions &options = {});
     CommandList buildBaseSurveyInCommand(uint32_t duration,
-                                         float accuracy, const GnssOptions &options = {});
+                                                                                 float accuracy, GnssSensorType sensorType,
+                                                                                 const GnssOptions &options = {});
     CommandList buildBaseFixedLlaCommand(double lat, double lon,
                                          double alt, float accuracy,
+                                                                                 GnssSensorType sensorType,
                                          const GnssOptions &options = {});
     CommandList buildBaseRtcmOutputCommand(const String &message,
-                                           const String &port, bool enabled);
+                                                                                     const String &port, bool enabled,
+                                                                                     GnssSensorType sensorType);
     CommandList buildGeotekLteUnicoreConfig(const String &setupMethod, uint32_t duration = 60,
                                             double lat = 0, double lon = 0, double alt = 0);
     Command commandListToBytes(const CommandList &commands);
