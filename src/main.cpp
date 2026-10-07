@@ -375,6 +375,7 @@ void initPrefs() {
     prefs.putInt("RSTRT_COUNT", 0); // chưa cấu hình được, lấy được
     prefs.putString("CONNECTION_TYPE", "4G");
     // Hai giá trị hợp lệ: "4G" và "WIFI". Giá trị này được nạp khi khởi động.
+    prefs.putString("GNSS_MDL_TYPE", "UBLOX");
 
     prefs.putString("APN", APN); // cấu hình đc, chưa lấy đc
     prefs.putString("WIFI_SSID", WIFI_SSID); // cấu hình đc, lấy đc
