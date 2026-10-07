@@ -16,24 +16,13 @@ namespace UbxCmdBuilder
         uint32_t uart1;
         uint32_t uart2;
         uint32_t usb;
+        uint32_t i2c = 0;
+        uint32_t spi = 0;
     };
     struct MessageKeys
     {
         const char *name;
         PortKeys keys;
-    };
-    struct RtcmPortKeys
-    {
-        uint32_t i2c;
-        uint32_t uart1;
-        uint32_t uart2;
-        uint32_t usb;
-        uint32_t spi;
-    };
-    struct RtcmMessageKeys
-    {
-        const char *name;
-        RtcmPortKeys keys;
     };
 
     constexpr std::array<MessageKeys, 16> NMEA_KEYS = {
@@ -63,17 +52,17 @@ namespace UbxCmdBuilder
         }    
     };
 
-    constexpr std::array<RtcmMessageKeys, 9> RTCM_KEYS = {
+    constexpr std::array<MessageKeys, 9> RTCM_KEYS = {
         {
-            {"1005", {0x209102BD, 0x209102BE, 0x209102BF, 0x209102C0, 0x209102C1}},
-            {"1074", {0x2091035E, 0x2091035F, 0x20910360, 0x20910361, 0x20910362}},
-            {"1084", {0x20910363, 0x20910364, 0x20910365, 0x20910366, 0x20910367}},
+            {"1005", {0x209102BE, 0x209102BF, 0x209102C0, 0x209102BD, 0x209102C1}},
+            {"1074", {0x2091035F, 0x20910360, 0x20910361, 0x2091035E, 0x20910362}},
+            {"1084", {0x20910364, 0x20910365, 0x20910366, 0x20910363, 0x20910367}},
             {"1094", {0x20910368, 0x20910369, 0x2091036A, 0x2091036B, 0x2091036C}},
-            {"1124", {0x2091036D, 0x2091036E, 0x2091036F, 0x20910370, 0x20910371}},
-            {"1077", {0x209102CC, 0x209102CD, 0x209102CE, 0x209102CF, 0x209102D0}},
-            {"1087", {0x209102D1, 0x209102D2, 0x209102D3, 0x209102D4, 0x209102D5}},
-            {"1097", {0x209102D6, 0x209102D7, 0x209102D8, 0x209102D9, 0x209102DA}},
-            {"1230", {0x20910303, 0x20910304, 0x20910305, 0x20910306, 0x20910307}},
+            {"1124", {0x2091036E, 0x2091036F, 0x20910370, 0x2091036D, 0x20910371}},
+            {"1077", {0x209102CD, 0x209102CE, 0x209102CF, 0x209102CC, 0x209102D0}},
+            {"1087", {0x209102D2, 0x209102D3, 0x209102D4, 0x209102D1, 0x209102D5}},
+            {"1097", {0x209102D7, 0x209102D8, 0x209102D9, 0x209102D6, 0x209102DA}},
+            {"1230", {0x20910304, 0x20910305, 0x20910306, 0x20910303, 0x20910307}},
         }
     };
 
@@ -81,21 +70,6 @@ namespace UbxCmdBuilder
     {
         return port == "I2C" || port == "UART1" || port == "UART2" ||
                port == "USB" || port == "SPI";
-    }
-
-    uint32_t rtcmKeyForPort(const RtcmPortKeys &keys, const String &port)
-    {
-        if (port == "I2C")
-            return keys.i2c;
-        else if (port == "UART1")
-            return keys.uart1;
-        else if (port == "UART2")
-            return keys.uart2;
-        else if (port == "USB")
-            return keys.usb;
-        else if (port == "SPI")
-            return keys.spi;
-        return 0;
     }
 
     inline bool isValidPort(const String &port) { 
@@ -115,6 +89,10 @@ namespace UbxCmdBuilder
             return keys.uart2;
         else if (port == "USB")
             return keys.usb;
+        else if (port == "I2C")
+            return keys.i2c;
+        else if (port == "SPI")
+            return keys.spi;
         return 0;
     }
 
@@ -365,7 +343,7 @@ namespace UbxCmdBuilder
                 entries.emplace_back(keyForPort(keys, port), diagnostics);
         for (const auto &message : RTCM_KEYS)
             for (const String &port : o.ports)
-                entries.emplace_back(rtcmKeyForPort(message.keys, port), rtcmEnabled(message.name, o));
+                entries.emplace_back(keyForPort(message.keys, port), rtcmEnabled(message.name, o));
         Command command = ubxCfgValsetU1(entries);
         struct MsmId
         {
@@ -480,7 +458,7 @@ namespace UbxCmdBuilder
             if (normalizedMessage == rtcm.name)
             {
                 commands.push_back(ubxCfgValsetU1({
-                    {rtcmKeyForPort(rtcm.keys, normalizedPort), enabled}
+                    {keyForPort(rtcm.keys, normalizedPort), enabled}
                 }));
                 commands.emplace_back(std::begin(UBLOX_SAVE_CONFIG), std::end(UBLOX_SAVE_CONFIG));
                 return commands;
