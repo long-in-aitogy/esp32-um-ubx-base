@@ -5,17 +5,6 @@
 #define TOP_LVL_CONFIG_H
 
 // ================= CẤU HÌNH KHỞI TẠO =================
-// #define PROGRAM_DEBUG 1
-
-#ifndef USE_KCT8103L_PA
-#define USE_KCT8103L_PA
-#endif
-
-#define TCP_IP 0
-
-#ifndef RTCM_COMMUNICATION_PROTOCOL
-#define RTCM_COMMUNICATION_PROTOCOL TCP_IP
-#endif
 
 #define GNSS_MODULE_TYPE_UBLOX 0
 #define GNSS_MODULE_TYPE_UNICORE 1
