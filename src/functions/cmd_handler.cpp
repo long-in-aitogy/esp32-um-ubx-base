@@ -99,8 +99,11 @@ cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
     UbxCmdBuilder::GnssOptions options;
     UbxCmdBuilder::CommandList commands;
     prefs.begin("myPrefs", true);
+    const String configuredSensorType = prefs.isKey("GNSS_MDL_TYPE")
+        ? prefs.getString("GNSS_MDL_TYPE")
+        : "UBLOX";
     const UbxCmdBuilder::GnssSensorType sensorType =
-        UbxCmdBuilder::sensorTypeFromString(prefs.getString("GNSS_SENSOR_TYPE", "UBLOX"));
+        UbxCmdBuilder::sensorTypeFromString(configuredSensorType);
     prefs.end();
 
     if (cmdWords.empty()) {
@@ -177,7 +180,7 @@ cmd_action_t handleGnssSetCommand(const std::vector<String> &cmdWords) {
         return CMD_ACTION_NONE;
     }
 
-    cmd_helper::saveStringPreference("GNSS_SENSOR_TYPE", sensorType);
+    cmd_helper::saveStringPreference("GNSS_MDL_TYPE", sensorType);
     Serial.println("[MQTT COMMAND DOWNLINK] Da chuyen chip GNSS sang " + sensorType +
                    ", dang khoi dong lai ESP32...");
     return CMD_ACTION_ESP_RESTART;
