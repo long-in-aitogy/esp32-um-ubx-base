@@ -100,7 +100,16 @@ String receiveRtcmFromGnss() {
     }
 
     if (!rtcmData.isEmpty()) {
+        constexpr uint16_t supportedRtcmTypes[] = {
+            1005, 1074, 1077, 1084, 1087,
+            1094, 1097, 1124, 1127, 1230,
+        };
         Serial.println("[UM980] Da nhan du lieu RTCM tu mach RTK. So byte: " + String(rtcmData.length()));
+        Serial.println("[UM980] So luong cac loai tin nhan RTCM da nhan: ");
+        RtcmMessageCounts messageCounts = consumeRtcmMessageCounts();
+        for (size_t i = 0; i < RTCM_SUPPORTED_MESSAGE_TYPE_COUNT; ++i) {
+            Serial.println("  - Tin nhan loai " + String(supportedRtcmTypes[i]) + ": " + String(messageCounts.values[i]));
+        }
         #if PROGRAM_DEBUG
         Serial.println("[UM980] Du lieu nhan duoc: ");
         Serial.println(rtcmData);
