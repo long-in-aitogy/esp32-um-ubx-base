@@ -17,8 +17,8 @@ inline constexpr int RX_GNSS = 22; // Nối TXD (Hàng dưới) của UM980
 inline constexpr int TX_GNSS = 23; // Nối RXD (Hàng dưới) của UM980
 inline constexpr int LED_PIN = 2;
 #elif BOARD_TDM_240X
-inline constexpr int RX_GNSS = 18; // Nối TXD (Hàng dưới) của UM980
-inline constexpr int TX_GNSS = 19; // Nối RXD (Hàng dưới) của UM980
+inline constexpr int RX_GNSS = 5; // Nối TXD (Hàng dưới) của UM980
+inline constexpr int TX_GNSS = 18; // Nối RXD (Hàng dưới) của UM980
 inline constexpr int LED_PIN = 2;
 #endif
 inline constexpr int GNSS_BAUD = 115200;
