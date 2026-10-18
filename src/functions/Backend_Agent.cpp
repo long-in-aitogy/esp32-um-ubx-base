@@ -4,12 +4,17 @@
 #include "functions/MQTT_Manager.h"
 #include "functions/NTRIP_Handler_IP.h"
 #include "functions/RTCM_Receiver.h"
+#include "functions/Unicore_Output.h"
+#include "functions/Base_Sample.h"
+#include "functions/Device_Token.h"
 #include "hardware/Connection_type.h"
 #include "hardware/Sim_handler.h"
 #include "hardware/Wifi_handler.h"
 
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <nvs.h>
+#include <esp_err.h>
 #include <time.h>
 #include <vector>
 #include <ctype.h>
@@ -90,8 +95,12 @@ bool migrateBackendPreferences() {
     bool migrated = true;
     migrated &= copyString("DEVICE_SERIAL");
     migrated &= copyString("DEVICE_NAME");
+    migrated &= copyString("SENSOR_TYPE");
     migrated &= copyBool("PROVISIONED");
     migrated &= copyBool("REMOTE_LOCK");
+    if (prefs.isKey("LOCK_SERVERS")) {
+        migrated &= backendPrefs.putUChar("LOCK_SERVERS", prefs.getUChar("LOCK_SERVERS")) == 1;
+    }
     migrated &= copyString("BASE_JSON");
     migrated &= copyString("SERVICE_JSON");
     migrated &= copyString("LICENSE_KEY");
@@ -366,7 +375,8 @@ String licenseBaseForSerial(const String &serial) {
 
 bool licenseMatchesSerial(const String &serial, const String &token) {
     if (serial.isEmpty() || token.isEmpty()) return false;
-    return token == licenseCodeFromBase(licenseBaseForSerial(serial));
+    return isDeviceBearerToken(token.c_str(), token.length())
+        || token == licenseCodeFromBase(licenseBaseForSerial(serial));
 }
 
 // The Python agent applies the VN2000 transformation after it has obtained a
@@ -909,8 +919,10 @@ void BackendAgent::loadPreferences() {
     }
 
     deviceName_ = statePrefs.getString("DEVICE_NAME", "ESP32-GNSS");
+    sensorType_ = statePrefs.getString("SENSOR_TYPE", "UNKNOWN");
     provisioned_ = statePrefs.getBool("PROVISIONED", false);
-    remotelyLocked_ = statePrefs.getBool("REMOTE_LOCK", false);
+    stationLock_.restore(statePrefs.getBool("REMOTE_LOCK", false),
+                         statePrefs.getUChar("LOCK_SERVERS", 0));
     baseConfig_ = statePrefs.getString("BASE_JSON", "{}");
     serviceConfig_ = statePrefs.getString("SERVICE_JSON", "{}");
     licenseToken_ = statePrefs.getString("LICENSE_KEY", "");
@@ -972,6 +984,7 @@ void BackendAgent::ensureDefaultServiceConfig() {
     service["server2_enabled"] = false;
     service["server2_stream_on_demand"] = false;
     service["server2_stream_active"] = false;
+    serviceConfig_.clear();
     serializeJson(defaults, serviceConfig_);
     Serial.printf("[BACKEND][NVS] Default SERVICE_JSON (%u bytes): %s.\n",
                   static_cast<unsigned>(serviceConfig_.length()),
@@ -979,19 +992,36 @@ void BackendAgent::ensureDefaultServiceConfig() {
 }
 
 bool BackendAgent::saveStatePreferences() {
-    if (!beginBackendPreferences(false)) return false;
-    Preferences &statePrefs = backendPreferences();
+    // Preferences' error-name table in Arduino 2.x does not cover newer NVS
+    // errors. Use the native API and commit this state snapshot once.
+    nvs_handle_t handle;
+    const esp_err_t opened = useDedicatedBackendPrefs
+        ? nvs_open_from_partition(BACKEND_PREFS_PARTITION, BACKEND_PREFS_NAMESPACE, NVS_READWRITE, &handle)
+        : nvs_open("myPrefs", NVS_READWRITE, &handle);
+    if (opened != ESP_OK) {
+        Serial.printf("[BACKEND][NVS] Open failed: %s (0x%x)\n", esp_err_to_name(opened), opened);
+        return false;
+    }
     bool saved = true;
-    saved &= statePrefs.putString("DEVICE_SERIAL", serialNumber_) == serialNumber_.length();
-    saved &= statePrefs.putString("DEVICE_NAME", deviceName_) == deviceName_.length();
-    saved &= statePrefs.putBool("PROVISIONED", provisioned_) == 1;
-    saved &= statePrefs.putBool("REMOTE_LOCK", remotelyLocked_) == 1;
-    saved &= statePrefs.putString("BASE_JSON", baseConfig_) == baseConfig_.length();
-    saved &= statePrefs.putString("SERVICE_JSON", serviceConfig_) == serviceConfig_.length();
-    saved &= statePrefs.putString("LICENSE_KEY", licenseToken_) == licenseToken_.length();
-    saved &= statePrefs.putString("CMD_RESULT", lastCommandResult_) == lastCommandResult_.length();
-    saved &= statePrefs.putString("PROGRESS_JSON", autoBaseProgress_) == autoBaseProgress_.length();
-    statePrefs.end();
+    const auto check = [&](const char *key, esp_err_t error) {
+        if (error != ESP_OK) {
+            Serial.printf("[BACKEND][NVS] Write %s failed: %s (0x%x)\n", key, esp_err_to_name(error), error);
+            saved = false;
+        }
+    };
+    check("DEVICE_SERIAL", nvs_set_str(handle, "DEVICE_SERIAL", serialNumber_.c_str()));
+    check("DEVICE_NAME", nvs_set_str(handle, "DEVICE_NAME", deviceName_.c_str()));
+    check("SENSOR_TYPE", nvs_set_str(handle, "SENSOR_TYPE", sensorType_.c_str()));
+    check("PROVISIONED", nvs_set_u8(handle, "PROVISIONED", provisioned_));
+    check("REMOTE_LOCK", nvs_set_u8(handle, "REMOTE_LOCK", stationLock_.all));
+    check("LOCK_SERVERS", nvs_set_u8(handle, "LOCK_SERVERS", stationLock_.servers));
+    check("BASE_JSON", nvs_set_str(handle, "BASE_JSON", baseConfig_.c_str()));
+    check("SERVICE_JSON", nvs_set_str(handle, "SERVICE_JSON", serviceConfig_.c_str()));
+    check("LICENSE_KEY", nvs_set_str(handle, "LICENSE_KEY", licenseToken_.c_str()));
+    check("CMD_RESULT", nvs_set_str(handle, "CMD_RESULT", lastCommandResult_.c_str()));
+    check("PROGRESS_JSON", nvs_set_str(handle, "PROGRESS_JSON", autoBaseProgress_.c_str()));
+    check("commit", nvs_commit(handle));
+    nvs_close(handle);
     return saved;
 }
 
@@ -1002,7 +1032,7 @@ void BackendAgent::setAgentState(const String &state) {
 }
 
 String BackendAgent::normalAgentState() const {
-    if (remotelyLocked_) return "locked";
+    if (stationLock_.all) return "locked";
     if (!licenseValid_) return "awaiting_license";
     return provisioned_ ? "online" : "unprovisioned";
 }
@@ -1041,19 +1071,6 @@ bool BackendAgent::transformToVn2000(const double latitude, const double longitu
                                  northing, easting);
 }
 
-bool BackendAgent::writeGnssCommand(const String &command, const uint32_t settleMs) {
-    if (command.isEmpty()) return false;
-    if (!rtcmBufferMutex
-        || xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
-        return false;
-    }
-    Serial1.print(command);
-    Serial1.flush();
-    xSemaphoreGive(rtcmBufferMutex);
-    if (settleMs > 0) vTaskDelay(pdMS_TO_TICKS(settleMs));
-    return true;
-}
-
 void BackendAgent::setWorkflowProgress(const String &phase, const uint8_t step,
                                        const uint8_t total, const String &details) {
     DynamicJsonDocument progress(CONFIG_DOCUMENT_SIZE);
@@ -1071,6 +1088,7 @@ void BackendAgent::setWorkflowProgress(const String &phase, const uint8_t step,
             }
         }
     }
+    autoBaseProgress_.clear();
     serializeJson(progress, autoBaseProgress_);
     markStatusDirty();
 }
@@ -1147,6 +1165,31 @@ bool BackendAgent::stopNtripRoverLocked() {
     return true;
 }
 
+bool BackendAgent::writeGnssCommands(const UbxCmdBuilder::CommandList &commands) {
+    if (commands.empty()) return false;
+    for (const auto &command : commands) {
+        uint32_t delayMs = 0;
+        if (delayMarker(command.data(), command.size(), delayMs)) {
+            delay(delayMs);
+            continue;
+        }
+        if (!rtcmBufferMutex
+            || xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) return false;
+        const size_t written = Serial1.write(command.data(), command.size());
+        Serial1.flush();
+        xSemaphoreGive(rtcmBufferMutex);
+        if (written != command.size()) return false;
+        delay(100);
+    }
+    return true;
+}
+
+bool BackendAgent::applyRoverMode() {
+    if (sensorType_ != "Ublox" && sensorType_ != "Unicorecomm") return false;
+    return writeGnssCommands(UbxCmdBuilder::buildRoverCommand(
+        sensorType_ == "Ublox" ? GNSS_MODULE_TYPE_UBLOX : GNSS_MODULE_TYPE_UNICORE));
+}
+
 bool BackendAgent::applyBaseCoordinates(const double latitude, const double longitude,
                                         const double altitude) {
     if (!std::isfinite(latitude) || !std::isfinite(longitude) || !std::isfinite(altitude)
@@ -1154,10 +1197,12 @@ bool BackendAgent::applyBaseCoordinates(const double latitude, const double long
         || longitude < -180.0 || longitude > 180.0) {
         return false;
     }
-    char command[128] = {};
-    snprintf(command, sizeof(command), "MODE BASE %.10f %.10f %.3f\r\n",
-             latitude, longitude, altitude);
-    return writeGnssCommand(command, 500) && writeGnssCommand("SAVECONFIG\r\n", 500);
+    if (sensorType_ != "Ublox" && sensorType_ != "Unicorecomm") return false;
+    UbxCmdBuilder::GnssOptions options;
+    options.ports = {"UART1"};
+    return writeGnssCommands(UbxCmdBuilder::buildBaseFixedLlaCommand(
+        latitude, longitude, altitude, 0.01f, options,
+        sensorType_ == "Ublox" ? GNSS_MODULE_TYPE_UBLOX : GNSS_MODULE_TYPE_UNICORE));
 }
 
 void BackendAgent::runWorkflow() {
@@ -1219,8 +1264,7 @@ bool BackendAgent::runAutoBaseWorkflow(JsonObject payload) {
 
     setAgentState("auto_setup_rover");
     setWorkflowProgress("set_rover", 1, 4);
-    if (!writeGnssCommand("MODE ROVER\r\n", 500)
-        || !writeGnssCommand("SAVECONFIG\r\n", 500)) {
+    if (!applyRoverMode()) {
         finish(false, false, "cannot configure GNSS rover mode");
         return false;
     }
@@ -1257,8 +1301,7 @@ bool BackendAgent::runAutoBaseWorkflow(JsonObject payload) {
         if (static_cast<int32_t>(now - nextSecondMs) >= 0) {
             nextSecondMs = now + 1000UL;
             const GnssTelemetrySnapshot snapshot = getGnssTelemetrySnapshot();
-            const bool usable = strcmp(snapshot.fixStatus, "RTK_FIXED") == 0
-                || strcmp(snapshot.fixStatus, "RTK_FLOAT") == 0;
+            const bool usable = freshRtkSample(now, snapshot.lastGgaMs, snapshot.fixStatus);
             fixedStreak = usable ? static_cast<uint8_t>(fixedStreak + 1) : 0;
             fixed = fixedStreak >= fixedStreakRequired;
             DynamicJsonDocument details(1024);
@@ -1292,6 +1335,7 @@ bool BackendAgent::runAutoBaseWorkflow(JsonObject payload) {
     altitudes.reserve(samplesNeeded);
 
     const uint32_t averageStartedMs = millis();
+    uint32_t lastSampleGgaMs = 0;
     nextSecondMs = averageStartedMs;
     while (millis() - averageStartedMs < averagingSeconds * 1000UL
            && latitudes.size() < samplesNeeded) {
@@ -1308,12 +1352,13 @@ bool BackendAgent::runAutoBaseWorkflow(JsonObject payload) {
         if (static_cast<int32_t>(now - nextSecondMs) >= 0) {
             nextSecondMs = now + 1000UL;
             const GnssTelemetrySnapshot snapshot = getGnssTelemetrySnapshot();
-            const bool usable = strcmp(snapshot.fixStatus, "RTK_FIXED") == 0
-                || strcmp(snapshot.fixStatus, "RTK_FLOAT") == 0;
-            if (usable && std::isfinite(snapshot.latitude) && std::isfinite(snapshot.longitude)
+            const bool usable = freshRtkSample(now, snapshot.lastGgaMs, snapshot.fixStatus);
+            if (usable && snapshot.lastGgaMs != lastSampleGgaMs
+                && std::isfinite(snapshot.latitude) && std::isfinite(snapshot.longitude)
                 && std::isfinite(snapshot.altitude)
                 && snapshot.latitude >= -90.0 && snapshot.latitude <= 90.0
                 && snapshot.longitude >= -180.0 && snapshot.longitude <= 180.0) {
+                lastSampleGgaMs = snapshot.lastGgaMs;
                 latitudes.push_back(snapshot.latitude);
                 longitudes.push_back(snapshot.longitude);
                 altitudes.push_back(snapshot.altitude);
@@ -1443,6 +1488,7 @@ bool BackendAgent::runAutoBaseWorkflow(JsonObject payload) {
     raw["lat"] = rawLatitude;
     raw["lon"] = rawLongitude;
     raw["alt"] = rawAltitude;
+    baseConfig_.clear();
     serializeJson(baseConfig, baseConfig_);
     saveStatePreferences();
     const bool transportRestored = restartConfiguredNtrip();
@@ -1535,8 +1581,7 @@ bool BackendAgent::runReferenceCheckWorkflow(JsonObject payload) {
 
     setAgentState("reference_check_rover");
     setWorkflowProgress("reference_check_set_rover", 1, 4);
-    if (!writeGnssCommand("MODE ROVER\r\n", 500)
-        || !writeGnssCommand("SAVECONFIG\r\n", 500)) {
+    if (!applyRoverMode()) {
         finish(false, false, "cannot configure GNSS rover mode");
         return false;
     }
@@ -1571,8 +1616,7 @@ bool BackendAgent::runReferenceCheckWorkflow(JsonObject payload) {
         if (static_cast<int32_t>(now - nextSecondMs) >= 0) {
             nextSecondMs = now + 1000UL;
             const GnssTelemetrySnapshot snapshot = getGnssTelemetrySnapshot();
-            fixed = strcmp(snapshot.fixStatus, "RTK_FIXED") == 0
-                || strcmp(snapshot.fixStatus, "RTK_FLOAT") == 0;
+            fixed = freshRtkSample(now, snapshot.lastGgaMs, snapshot.fixStatus);
             DynamicJsonDocument details(512);
             details["fix_status"] = snapshot.fixStatus;
             details["elapsed"] = (now - waitStartedMs) / 1000UL;
@@ -1613,8 +1657,7 @@ bool BackendAgent::runReferenceCheckWorkflow(JsonObject payload) {
         if (static_cast<int32_t>(now - nextSecondMs) >= 0) {
             nextSecondMs = now + 1000UL;
             const GnssTelemetrySnapshot snapshot = getGnssTelemetrySnapshot();
-            const bool usable = strcmp(snapshot.fixStatus, "RTK_FIXED") == 0
-                || strcmp(snapshot.fixStatus, "RTK_FLOAT") == 0;
+            const bool usable = freshRtkSample(now, snapshot.lastGgaMs, snapshot.fixStatus);
             if (usable && std::isfinite(snapshot.latitude) && std::isfinite(snapshot.longitude)
                 && std::isfinite(snapshot.altitude) && snapshot.latitude >= -90.0
                 && snapshot.latitude <= 90.0 && snapshot.longitude >= -180.0
@@ -1742,15 +1785,15 @@ String BackendAgent::buildStatusPayload() {
     DynamicJsonDocument serviceDoc(CONFIG_DOCUMENT_SIZE);
     deserializeJson(serviceDoc, serviceConfig_);
     const JsonObjectConst service = serviceDoc.as<JsonObjectConst>();
-    const bool server1Active = licenseValid_ && provisioned_
+    const bool server1Active = licenseValid_ && provisioned_ && !isServerLocked(1)
         && effectiveStreamActive(service, 1, controlPlaneFailOpen_);
-    const bool server2Active = licenseValid_ && provisioned_
+    const bool server2Active = licenseValid_ && provisioned_ && !isServerLocked(2)
         && effectiveStreamActive(service, 2, controlPlaneFailOpen_);
     const bool anyStream = server1Active || server2Active;
     const bool onDemand = jsonBool(service, "stream_on_demand", false);
 
     String status = agentState_;
-    if (remotelyLocked_) {
+    if (stationLock_.all) {
         status = "locked";
     } else if (status != "configuring" && status != "rebooting"
         && status != "rebooting_for_reset" && !status.startsWith("auto_setup")
@@ -1778,11 +1821,11 @@ String BackendAgent::buildStatusPayload() {
     doc["status_sequence"] = statusSequence_;
     doc["rtk_fix_status"] = gnss.fixStatus;
     doc["base_mode_active"] = baseConfig_ != "{}" && baseConfig_.length() > 2;
-    doc["detected_chip_type"] = "Unicorecomm";
+    doc["detected_chip_type"] = sensorType_;
     doc["detected_chip_port"] = "Serial1";
     doc["detected_chip_baud"] = GNSS_BAUD;
     doc["is_provisioned"] = provisioned_;
-    doc["is_locked"] = remotelyLocked_;
+    doc["is_locked"] = stationLock_.all;
     doc["is_synced"] = true;
     doc["is_lte"] = isGsmConnection();
     JsonObject rtcmStats = doc.createNestedObject("rtcm_stats");
@@ -1799,14 +1842,43 @@ String BackendAgent::buildStatusPayload() {
     cpu["frequency_mhz"] = ESP.getCpuFreqMHz();
     cpu["count"] = 2;
     JsonObject memory = system.createNestedObject("memory");
-    memory["free_heap_bytes"] = ESP.getFreeHeap();
-    memory["total_heap_bytes"] = ESP.getHeapSize();
-    memory["percent"] = ESP.getHeapSize() > 0
-        ? 100.0 - (static_cast<double>(ESP.getFreeHeap()) * 100.0 / ESP.getHeapSize())
+    const uint32_t heapTotal = ESP.getHeapSize();
+    const uint32_t heapFree = ESP.getFreeHeap();
+    const uint32_t heapUsed = (heapTotal > heapFree) ? (heapTotal - heapFree) : 0;
+    memory["free_heap_bytes"] = heapFree;
+    memory["total_heap_bytes"] = heapTotal;
+    memory["used_bytes"] = heapUsed;
+    memory["used_kb"] = heapUsed / 1024;
+    memory["total_kb"] = heapTotal / 1024;
+    memory["used_mb"] = static_cast<double>(heapUsed) / (1024.0 * 1024.0);
+    memory["total_mb"] = static_cast<double>(heapTotal) / (1024.0 * 1024.0);
+    memory["percent"] = heapTotal > 0
+        ? 100.0 - (static_cast<double>(heapFree) * 100.0 / heapTotal)
         : 0.0;
+
+    JsonObject disk = system.createNestedObject("disk");
+    const uint32_t flashTotal = ESP.getFlashChipSize();
+    const uint32_t sketchFree = ESP.getFreeSketchSpace();
+    const uint32_t flashUsed = (flashTotal > sketchFree) ? (flashTotal - sketchFree) : 0;
+    disk["type"] = "Flash";
+    disk["total_bytes"] = flashTotal;
+    disk["free_bytes"] = sketchFree;
+    disk["used_bytes"] = flashUsed;
+    disk["total_mb"] = static_cast<double>(flashTotal) / (1024.0 * 1024.0);
+    disk["used_mb"] = static_cast<double>(flashUsed) / (1024.0 * 1024.0);
+    disk["total_gb"] = static_cast<double>(flashTotal) / (1024.0 * 1024.0 * 1024.0);
+    disk["used_gb"] = static_cast<double>(flashUsed) / (1024.0 * 1024.0 * 1024.0);
+    disk["percent"] = flashTotal > 0 ? (static_cast<double>(flashUsed) * 100.0 / flashTotal) : 0.0;
     system["uptime_seconds"] = millis() / 1000UL;
     system["timestamp"] = timestamp.toInt();
     system["auth_license_bypass"] = false;
+    JsonObject deviceLock = system.createNestedObject("device_lock");
+    deviceLock["scoped"] = true;
+    deviceLock["all"] = stationLock_.all;
+    JsonArray lockedServers = deviceLock.createNestedArray("locked_servers");
+    for (uint8_t id = 1; id <= 2; ++id) {
+        if (isServerLocked(id)) lockedServers.add(id);
+    }
 
     JsonObject nmeaHealth = doc.createNestedObject("nmea_health");
     JsonObject typeCounts = nmeaHealth.createNestedObject("type_counts");
@@ -1889,7 +1961,8 @@ String BackendAgent::buildStatusPayload() {
     stream1["can_push"] = server1Active;
     stream1["configured_can_push"] = server1Configured;
     stream1["effective_can_push"] = server1Active;
-    stream1["fail_open_forced"] = controlPlaneFailOpen_ && !server1Configured;
+    stream1["locked"] = isServerLocked(1);
+    stream1["fail_open_forced"] = server1Active && controlPlaneFailOpen_ && !server1Configured;
     stream1["sleep"] = server1Enabled && server1OnDemand && !server1Active;
     stream1["connected"] = ntripServerConnected(1);
     stream1["bps"] = ntripServerBps(1);
@@ -1906,7 +1979,8 @@ String BackendAgent::buildStatusPayload() {
     stream2["can_push"] = server2Active;
     stream2["configured_can_push"] = server2Configured;
     stream2["effective_can_push"] = server2Active;
-    stream2["fail_open_forced"] = controlPlaneFailOpen_ && !server2Configured;
+    stream2["locked"] = isServerLocked(2);
+    stream2["fail_open_forced"] = server2Active && controlPlaneFailOpen_ && !server2Configured;
     stream2["sleep"] = server2Enabled && server2OnDemand && !server2Active;
     stream2["connected"] = ntripServerConnected(2);
     stream2["bps"] = ntripServerBps(2);
@@ -2057,12 +2131,15 @@ void BackendAgent::setupWebsocket() {
 #if BACKEND_WEBSOCKET_ENABLED
     if (!websocket_) return;
     const String host = readPreference("BACKEND_HOST", BACKEND_HOST);
+    prefs.begin("myPrefs", true);
+    const uint16_t port = prefs.getUShort("BACKEND_PORT", BACKEND_WEBSOCKET_PORT);
+    prefs.end();
     const String path = String("/ws/pi/") + serialNumber_
         + (licenseToken_.isEmpty() ? String() : String("?token=") + urlEncode(licenseToken_));
     if (isWifiConnection()) {
-        websocket_->begin(host, BACKEND_WEBSOCKET_PORT, path, backendWebsocketWifiClient);
+        websocket_->begin(host, port, path, backendWebsocketWifiClient);
     } else {
-        websocket_->begin(host, BACKEND_WEBSOCKET_PORT, path, backendWebsocketGsmClient);
+        websocket_->begin(host, port, path, backendWebsocketGsmClient);
     }
 #endif
 }
@@ -2186,6 +2263,7 @@ void BackendAgent::recordCommandResult(const String &command, const String &sour
     doc["detail"] = detail.substring(0, 300);
     doc["command_id"] = commandId;
     doc["timestamp"] = epochString().toInt();
+    lastCommandResult_.clear();
     serializeJson(doc, lastCommandResult_);
     const bool saved = saveStatePreferences();
     Serial.printf("[BACKEND][CMD] %s id=%s source=%s status=%s; NVS=%s\n",
@@ -2299,11 +2377,12 @@ void BackendAgent::applyServiceStreamCommand(JsonObject payload) {
     }
     service["stream_active"] = BackendAgent::effectiveStreamActive(service, 1, false)
         || BackendAgent::effectiveStreamActive(service, 2, false);
+    serviceConfig_.clear();
     serializeJson(serviceDoc, serviceConfig_);
     saveStatePreferences();
 }
 
-bool BackendAgent::executeRawCommands(JsonArray commands, String &error) {
+bool BackendAgent::executeRawCommands(JsonArray commands, String &error, const String &sensorType) {
     if (commands.isNull() || commands.size() == 0) {
         error = "missing payload.commands_b64";
         return false;
@@ -2329,6 +2408,8 @@ bool BackendAgent::executeRawCommands(JsonArray commands, String &error) {
             delay(delayMs);
             continue;
         }
+        if (sensorType == "Unicorecomm") routeUnicoreOutput(decoded, length, GNSS_UNICORE_PORT);
+        else if (sensorType == "Ublox") UbxCmdBuilder::routeUbloxOutput(decoded, length);
         if (rtcmBufferMutex && xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
             Serial1.write(decoded, length);
             Serial1.flush();
@@ -2377,7 +2458,7 @@ void BackendAgent::handleCommand(const String &source, const String &message) {
         publishStatus(true);
         return;
     }
-    if (remotelyLocked_ && command != "LOCK_DEVICE" && command != "UNLOCK_DEVICE") {
+    if (stationLock_.all && command != "LOCK_DEVICE" && command != "UNLOCK_DEVICE") {
         recordCommandResult(command, source, "rejected", "device is locked", commandId);
         publishStatus(true);
         return;
@@ -2397,16 +2478,40 @@ void BackendAgent::handleCommand(const String &source, const String &message) {
     bool restartAfterCommand = false;
 
     if (command == "LOCK_DEVICE") {
-        requestWorkflowStop();
-        remotelyLocked_ = true;
-        setAgentState("locked");
-        setupNTRIP();
-        detail = "device locked";
+        if (payload.containsKey("locked_servers")) {
+            JsonArrayConst ids = payload["locked_servers"].as<JsonArrayConst>();
+            int serverIds[2] = {};
+            size_t count = 0;
+            if (ids.isNull()) {
+                success = false;
+            } else {
+                for (JsonVariantConst id : ids) {
+                    if (!id.is<int>() || id.as<int>() < 1 || id.as<int>() > 2) {
+                        success = false;
+                        break;
+                    }
+                    const int serverId = id.as<int>();
+                    if (count == 0 || serverIds[0] != serverId) {
+                        if (count < 2) serverIds[count++] = serverId;
+                    }
+                }
+            }
+            if (success) success = stationLock_.setScoped(serverIds, count);
+            if (!success) error = "payload.locked_servers must contain only server IDs 1 or 2";
+        } else {
+            requestWorkflowStop();
+            stationLock_.all = true;
+            stationLock_.servers = 0;
+        }
+        if (success) {
+            setAgentState(normalAgentState());
+            // loopNTRIP applies the policy per endpoint. Rebuilding all sockets
+            // here would interrupt the other host during a scoped lock.
+            detail = "device lock updated";
+        }
     } else if (command == "UNLOCK_DEVICE") {
-        remotelyLocked_ = false;
+        stationLock_.restore(false, 0);
         setAgentState(normalAgentState());
-        setupNTRIP();
-        connectNTRIP();
         detail = "device unlocked";
     } else if (command == "PROVISION_DEVICE") {
         const String name = payload["name"] | String();
@@ -2426,20 +2531,32 @@ void BackendAgent::handleCommand(const String &source, const String &message) {
             Serial.println("[BACKEND][LICENSE] Lenh DEPLOY_LICENSE khong co license_key.");
             success = false;
             error = "missing payload.license_key";
+        } else if (!licenseMatchesSerial(serialNumber_, license)) {
+            success = false;
+            error = "invalid device token or legacy license";
         } else {
             Serial.println("[BACKEND][LICENSE] Da nhan license_key (khong in noi dung key).");
+            const String previousToken = licenseToken_;
+            const bool previousValid = licenseValid_;
             licenseToken_ = license;
-            licenseValid_ = licenseMatchesSerial(serialNumber_, licenseToken_);
+            licenseValid_ = true;
             const bool saved = saveStatePreferences();
             Serial.printf("[BACKEND][LICENSE] Kiem tra: %s; luu NVS: %s.\n",
                           licenseValid_ ? "HOP LE" : "KHONG HOP LE",
                           saved ? "THANH CONG" : "THAT BAI");
-            detail = "license deployed; rebooting";
-            restartAfterCommand = true;
-            setAgentState("rebooting");
-            if (websocket_) {
-                websocket_->disconnect(false);
-                setupWebsocket();
+            if (!saved) {
+                licenseToken_ = previousToken;
+                licenseValid_ = previousValid;
+                success = false;
+                error = "cannot persist device token";
+            } else {
+                detail = "license deployed; rebooting";
+                restartAfterCommand = true;
+                setAgentState("rebooting");
+                if (websocket_) {
+                    websocket_->disconnect(false);
+                    setupWebsocket();
+                }
             }
         }
     } else if (command == "DEPLOY_SERVICE_CONFIG") {
@@ -2465,6 +2582,7 @@ void BackendAgent::handleCommand(const String &source, const String &message) {
                     service[activeKey.c_str()] = globalActive;
                 }
             }
+            serviceConfig_.clear();
             serializeJson(serviceDoc, serviceConfig_);
             detail = "service config deployed";
             setupNTRIP();
@@ -2483,21 +2601,51 @@ void BackendAgent::handleCommand(const String &source, const String &message) {
         }
     } else if (command == "EXECUTE_RAW_COMMANDS") {
         JsonArray commands = payload["commands_b64"].as<JsonArray>();
-        success = executeRawCommands(commands, error);
+        const JsonObject originalConfig = doc["original_config"].as<JsonObject>();
+        const bool configuringBase = String(originalConfig["mode"] | "") == "BASE";
+        const String sensorType = originalConfig["sensor_type"] | sensorType_;
+        if (workflowActive()) {
+            requestWorkflowStop();
+            const uint32_t stopWaitMs = millis();
+            while (workflowActive() && static_cast<uint32_t>(millis() - stopWaitMs) < 1500UL) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+            }
+        }
+        if (workflowActive()) {
+            success = false;
+            error = "cannot stop active base workflow";
+        } else if (configuringBase && sensorType != "Ublox" && sensorType != "Unicorecomm") {
+            success = false;
+            error = "unsupported GNSS sensor_type";
+        } else {
+            success = executeRawCommands(commands, error, configuringBase ? sensorType : String());
+        }
         detail = success ? "raw commands executed" : error;
         if (success) {
-            const JsonObject originalConfig = doc["original_config"].as<JsonObject>();
+            if (configuringBase) {
+                sensorType_ = sensorType;
+                autoBaseProgress_.clear();
+                setAgentState(normalAgentState());
+            }
             if (!originalConfig.isNull() && originalConfig.containsKey("params")) {
                 DynamicJsonDocument baseDoc(CONFIG_DOCUMENT_SIZE);
                 baseDoc.set(originalConfig["params"]);
                 JsonObject base = baseDoc.as<JsonObject>();
                 if (originalConfig.containsKey("mode")) base["mode"] = originalConfig["mode"];
+                baseConfig_.clear();
                 serializeJson(baseDoc, baseConfig_);
                 publishConfigState("base_config_state");
             }
         }
     } else if (command == "CHECK_BASE_STATUS") {
-        if (rtcmBufferMutex && xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
+        if (sensorType_ == "Ublox") {
+            // UBX-CFG-TMODE3 poll (the stream reader owns incoming bytes).
+            const UbxCmdBuilder::Command poll = {0xB5, 0x62, 0x06, 0x71, 0x00, 0x00, 0x77, 0x6B};
+            success = writeGnssCommands({poll});
+            if (success) detail = "base status requested from GNSS";
+            else error = "GNSS serial is busy";
+        } else if (sensorType_ == "Unicorecomm" && rtcmBufferMutex
+            && xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
             Serial1.print("mode\r\n");
             delay(250);
             Serial1.print("log\r\n");
@@ -2508,6 +2656,7 @@ void BackendAgent::handleCommand(const String &source, const String &message) {
             error = "GNSS serial is busy";
         }
     } else if (command == "TRIGGER_AUTO_BASE") {
+        const String sensorType = payload["sensor_type"] | sensorType_;
         const int requestedPort = payload["port"] | 0;
         const bool hasConnection = !String(payload["ip"] | String()).isEmpty()
             && !String(payload["user"] | String()).isEmpty()
@@ -2517,10 +2666,14 @@ void BackendAgent::handleCommand(const String &source, const String &message) {
         if (workflowActive()) {
             success = false;
             error = "another base workflow is already running";
+        } else if (sensorType != "Ublox" && sensorType != "Unicorecomm") {
+            success = false;
+            error = "select Ublox or Unicorecomm in CORS before starting auto base";
         } else if (!hasConnection) {
             success = false;
             error = "missing or invalid CORS connection fields";
         } else {
+            sensorType_ = sensorType;
             String workflowPayload;
             serializeJson(payload, workflowPayload);
             if (!startWorkflow("auto_base", workflowPayload)) {
@@ -2629,6 +2782,7 @@ void BackendAgent::handleCommand(const String &source, const String &message) {
             base["projection_source"] = "manual_province_override";
             base["vn2000_northing"] = northing;
             base["vn2000_easting"] = easting;
+            baseConfig_.clear();
             serializeJson(baseDoc, baseConfig_);
             saveStatePreferences();
             publishConfigState("base_config_state");
@@ -2688,7 +2842,7 @@ void BackendAgent::publishTextFallback(const String &message) {
     if (websocketConnected()) websocket_->sendText(message);
 }
 
-bool backendDeviceLocked() { return backendAgent.isLocked(); }
+bool backendDeviceLocked(uint8_t serverId) { return serverId == 0 ? backendAgent.isLocked() : backendAgent.isServerLocked(serverId); }
 bool backendControlPlaneFailOpen() { return backendAgent.controlPlaneFailOpen(); }
 bool backendDeviceProvisioned() { return backendAgent.isProvisioned(); }
 bool backendLicenseValid() { return backendAgent.licenseValid(); }

@@ -2,6 +2,9 @@
 #include <vector>
 #include <Preferences.h>
 #include "functions/ubx_cmd_builder.h"
+#include <cstring>
+
+extern SemaphoreHandle_t rtcmBufferMutex;
 
 extern Preferences prefs;
 
@@ -61,11 +64,23 @@ namespace cmd_helper {
 
     inline void sendGnssCommands(const UbxCmdBuilder::CommandList &commands)
     {
-        const UbxCmdBuilder::Command commandBytes = UbxCmdBuilder::commandListToBytes(commands);
-        if (!commandBytes.empty()) {
-            Serial1.write(commandBytes.data(), commandBytes.size());
+        for (const auto &command : commands) {
+            // Delay markers are host-side instructions, never receiver data.
+            if (command.size() >= 9 && memcmp(command.data(), "$DELAY_", 7) == 0) {
+                String marker;
+                for (uint8_t byte : command) marker += static_cast<char>(byte);
+                delay(marker.substring(7).toInt());
+                continue;
+            }
+            if (!rtcmBufferMutex || xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(1500)) != pdTRUE) {
+                Serial.println("[GNSS] UART busy; command stopped.");
+                return;
+            }
+            Serial1.write(command.data(), command.size());
+            Serial1.flush();
+            xSemaphoreGive(rtcmBufferMutex);
+            delay(100);
         }
-        Serial1.flush();
     }
 
 } // namespace cmd_helper
@@ -97,6 +112,7 @@ std::vector<String> splitCommand(const String &command) {
 
 cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
     UbxCmdBuilder::GnssOptions options;
+    options.ports = {"UART1"};
     UbxCmdBuilder::CommandList commands;
 
     if (cmdWords.empty()) {
@@ -190,6 +206,17 @@ cmd_action_t handleEspCommand(const std::vector<String> &cmdWords) {
         if (cmdWords[1] == "4G" && cmdWords[2] == "PASS") {
             Serial.println("[MQTT COMMAND DOWNLINK] Lenh yeu cau cau hinh 4G PASS");
             return cmd_helper::saveStringPreference("GPRS_PASS", cmdWords[3]);
+        }
+        if (cmdWords[1] == "BACKEND" && cmdWords[2] == "HOST") {
+            return cmd_helper::saveStringPreference("BACKEND_HOST", cmdWords[3]);
+        }
+        if (cmdWords[1] == "BACKEND" && cmdWords[2] == "PORT") {
+            const long port = cmdWords[3].toInt();
+            if (port >= 1 && port <= 65535) {
+                return cmd_helper::saveUShortPreference("BACKEND_PORT", static_cast<uint16_t>(port));
+            }
+            Serial.println("[BACKEND] Port must be 1..65535.");
+            return CMD_ACTION_NONE;
         }
     }
     

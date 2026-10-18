@@ -62,12 +62,8 @@ void setup() {
     Serial1.begin(GNSS_BAUD, SERIAL_8N1, static_cast<uint8_t>(gnssRX), static_cast<uint8_t>(gnssTX));
     Serial1.setTimeout(100);
 
-    if (needReset) {
-        Serial.println("[SETUP] Cau hinh UM980 lan dau tien...");
-        bootstrapUM980();
-        Serial.println("[SETUP] Da cau hinh UM980, khoi dong lai de ap dung.");
-        ESP.restart();
-    }
+    // CORS supplies the receiver type with the base configuration. Do not
+    // send Unicore commands to an unknown (possibly u-blox) receiver at boot.
 
     // Load the serial, token, service configuration and persistent agent state
     // before either transport starts publishing status.

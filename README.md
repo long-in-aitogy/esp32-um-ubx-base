@@ -1,4 +1,8 @@
-# ESP32 GNSS Gateway (UM980 / UM982)
+# ESP32 GNSS Gateway (UM980 / UM982 / u-blox)
+
+Chế độ **base 4G di động** kết nối CORS: nhập tọa độ chính xác, survey-in,
+auto base và khóa trạm. Xem [hướng dẫn kết nối và kiểm tra](docs/base-4g.md).
+Loại GNSS được chọn từ CORS; cùng firmware hỗ trợ Unicore và u-blox.
 
 Firmware dành cho vi điều khiển ESP32 (ví dụ board TDM2402) đóng vai trò làm Gateway kết nối với module GNSS định vị động học thời gian thực (RTK) như Unicore UM980 hoặc UM982. 
 
@@ -166,4 +170,4 @@ Các lệnh này cấu hình module GNSS ở chế độ base và được gửi
 | --- | --- |
 | `ATG CONFIG RESET` | Đánh dấu khôi phục cấu hình mặc định, sau đó khởi động lại ESP32. Lần khởi động kế tiếp sẽ xóa toàn bộ cấu hình đã lưu trong Preferences và nạp lại giá trị mặc định. |
 
-> Lưu ý: Firmware hiện không phản hồi trạng thái lệnh qua MQTT. Theo dõi Serial Monitor để kiểm tra log xử lý lệnh; riêng lệnh GNSS sẽ báo lỗi khi thiếu hoặc thừa tham số.
+> Lệnh JSON từ CORS phản hồi qua `last_command_result` trong gói status MQTT/WebSocket. Lệnh `ATG` cũ vẫn ghi kết quả lên Serial Monitor; lệnh GNSS báo lỗi khi thiếu hoặc thừa tham số.

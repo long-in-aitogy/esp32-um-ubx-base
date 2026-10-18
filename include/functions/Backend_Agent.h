@@ -3,6 +3,8 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include "functions/Station_Lock.h"
+#include "functions/ubx_cmd_builder.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
@@ -29,7 +31,8 @@ public:
     String lwtPayload() const;
 
     const String &serial() const { return serialNumber_; }
-    bool isLocked() const { return remotelyLocked_; }
+    bool isLocked() const { return stationLock_.locked(); }
+    bool isServerLocked(uint8_t serverId) const { return stationLock_.locked(serverId); }
     bool isProvisioned() const { return provisioned_; }
     bool licenseValid() const { return licenseValid_; }
     bool mqttConnected() const;
@@ -56,9 +59,10 @@ private:
     String baseConfig_ = "{}";
     String serviceConfig_ = "{}";
     String licenseToken_;
+    String sensorType_ = "UNKNOWN";
 
     bool provisioned_ = false;
-    bool remotelyLocked_ = false;
+    StationLock stationLock_;
     bool licenseValid_ = false;
     bool mqttConnected_ = false;
     bool websocketConnected_ = false;
@@ -97,7 +101,8 @@ private:
     void runWorkflow();
     static void workflowTaskThunk(void *parameter);
     void requestWorkflowStop();
-    bool writeGnssCommand(const String &command, uint32_t settleMs = 500);
+    bool applyRoverMode();
+    bool writeGnssCommands(const UbxCmdBuilder::CommandList &commands);
     void setWorkflowProgress(const String &phase, uint8_t step, uint8_t total,
                              const String &details = String());
     bool runAutoBaseWorkflow(JsonObject payload);
@@ -129,7 +134,7 @@ private:
                              const String &commandId);
     void publishConfigState(const char *kind);
     void applyServiceStreamCommand(JsonObject payload);
-    bool executeRawCommands(JsonArray commands, String &error);
+    bool executeRawCommands(JsonArray commands, String &error, const String &sensorType = String());
     void publishTextFallback(const String &message);
 
     friend class BackendAgentWebsocket;
@@ -139,7 +144,7 @@ extern BackendAgent backendAgent;
 
 // Small free functions keep NTRIP_Handler_IP.cpp independent from the class
 // implementation and avoid circular includes.
-bool backendDeviceLocked();
+bool backendDeviceLocked(uint8_t serverId = 0);
 bool backendControlPlaneFailOpen();
 bool backendDeviceProvisioned();
 bool backendLicenseValid();

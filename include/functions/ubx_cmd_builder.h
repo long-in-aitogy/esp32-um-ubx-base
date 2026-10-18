@@ -2,6 +2,7 @@
 #define COMMAND_BUILDER_H
 
 #include <Arduino.h>
+#include "Top_Lvl_Config.h"
 #include <cstdint>
 #include <vector>
 
@@ -39,10 +40,14 @@ namespace UbxCmdBuilder
     GnssOptions normalizeGnssOptions(GnssOptions options = {});
     Command buildUbloxOutputConfigCommand(const GnssOptions &options = {});
     CommandList buildBaseSurveyInCommand(uint32_t duration,
-                                         float accuracy, const GnssOptions &options = {});
+                                         float accuracy, const GnssOptions &options = {},
+                                         int moduleType = GNSS_MODULE_TYPE);
     CommandList buildBaseFixedLlaCommand(double lat, double lon,
                                          double alt, float accuracy,
-                                         const GnssOptions &options = {});
+                                         const GnssOptions &options = {},
+                                         int moduleType = GNSS_MODULE_TYPE);
+    CommandList buildRoverCommand(int moduleType);
+    void routeUbloxOutput(uint8_t *data, size_t length);
     CommandList buildGeotekLteUnicoreConfig(const String &setupMethod, uint32_t duration = 60,
                                             double lat = 0, double lon = 0, double alt = 0);
     Command commandListToBytes(const CommandList &commands);
