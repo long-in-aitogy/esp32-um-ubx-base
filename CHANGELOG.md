@@ -116,3 +116,21 @@ Tài liệu này ghi lại chi tiết toàn bộ các cập nhật, tối ưu h�
     2. **Active Probe U-blox (ZED-F9P, NEO-M8P...)**: Gửi gói tin nhị phân UBX poll `UBX-MON-VER` (`\xB5\x62\x0A\x04\x00\x00\x0E\x34`). Nếu nhận lại header phản hồi `0xB5 0x62 0x0A 0x04`, tự động xác định là `Ublox` và lưu NVS.
     3. **Passive Scan NMEA/RTCM**: Lắng nghe dòng dữ liệu NMEA lúc khởi động hoặc trong quá trình nhận luồng RTCM (`RTCM_Receiver.cpp`). Nếu phát hiện câu đặc trưng `$PUBX`, tự động nhận dạng là `Ublox`.
   * Khi nhận diện thành công, chip sẽ tự lưu cấu hình vào Flash NVS, trạm báo thẳng `detected_chip_type` lên CORS Server $\rightarrow$ Biển cảnh báo vàng trên web biến mất hoàn toàn.
+
+---
+
+## 10. Tối Ưu RAM Sâu, Làm Tròn Số Liệu Flash và Quét Chip Nóng trên Nền (Hot-Plug Auto Probe)
+* **Tệp thay đổi**: `include/functions/Backend_Agent.h`, `src/functions/Backend_Agent.cpp`, `src/main.cpp`
+* **Bối cảnh & Vấn đề**:
+  * Flash phần trăm bị in chuỗi dài nhiều số thập phân (`23.09303284% Used`) do chưa được làm tròn ở phía firmware.
+  * Hàng đợi NMEA Queue chiếm cố định tới 32 phần tử (mỗi phần tử 514 bytes $\approx$ 16.5KB DRAM), các FreeRTOS Task Stacks cấp dư thừa.
+  * Khi người dùng bật ESP32 trước rồi mới cắm module GNSS vào sau, firmware cũ chỉ quét 1 lần duy nhất lúc boot nên không phát hiện được chip khi cắm nóng.
+* **Giải pháp đã triển khai**:
+  * **Làm tròn số liệu Flash & RAM**: Quy chuẩn `percent` và `mb` về 1 chữ số thập phân (`round(val * 10.0) / 10.0`) $\rightarrow$ Hiển thị gọn gàng `23.1% Used`, `Free: 3.1 MB (4MB Flash)`.
+  * **Thu hồi ~18KB RAM tĩnh & động**:
+    * Rút gọn `NMEA_QUEUE_LENGTH` từ 32 xuống 8 phần tử $\rightarrow$ Tiết kiệm ngay ~12KB DRAM vĩnh viễn.
+    * Tinh chỉnh Task Stacks: `taskMQTT` (8192 $\rightarrow$ 5120), `taskNtrip` (6144 $\rightarrow$ 4096), `taskSerialCommand` (3072 $\rightarrow$ 2048) $\rightarrow$ Tiết kiệm thêm 6KB.
+    * Rút gọn `STATUS_DOCUMENT_SIZE` từ 16KB về 8KB khi tạo JSON status.
+  * **Tự động quét chip ngầm (Hot-plug Probe)**:
+    * Trong hàm `BackendAgent::loop()`: Nếu `sensorType_ == "UNKNOWN"`, hệ thống tự động kích hoạt thăm dò cổng `Serial1` mỗi 8 giây một lần (chỉ mất ~150ms nếu chưa cắm chip, hoàn toàn không gây khựng hệ thống).
+    * Ngay khi người dùng cắm module GNSS vào mạch, ESP32 sẽ tự động nhận diện và cập nhật ngay lên Dashboard mà không cần phải khởi động lại.

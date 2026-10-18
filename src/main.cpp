@@ -110,9 +110,9 @@ void setup() {
     setupNTRIP();
 #endif
 
-    xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", 8192, nullptr, 3, nullptr, 1);
-    xTaskCreatePinnedToCore(taskSerialCommand, "Serial CMD Task", 3072, nullptr, 1, nullptr, 1);
-    xTaskCreatePinnedToCore(taskNtrip, "NTRIP Task", 6144, nullptr, 2, nullptr, 1);
+    xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", 5120, nullptr, 3, nullptr, 1);
+    xTaskCreatePinnedToCore(taskSerialCommand, "Serial CMD Task", 2048, nullptr, 1, nullptr, 1);
+    xTaskCreatePinnedToCore(taskNtrip, "NTRIP Task", 4096, nullptr, 2, nullptr, 1);
 
     Serial.println("=========================================");
     Serial.println("        KHOI DONG HOAN TAT               ");

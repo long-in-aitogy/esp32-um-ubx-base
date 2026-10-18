@@ -74,6 +74,7 @@ private:
     volatile bool workflowCancelRequested_ = false;
 
     uint32_t lastStatusMs_ = 0;
+    uint32_t lastChipProbeMs_ = 0;
     uint32_t controlPlaneArmedMs_ = 0;
     uint32_t lastControlCheckMs_ = 0;
     uint32_t lastMqttAckMs_ = 0;

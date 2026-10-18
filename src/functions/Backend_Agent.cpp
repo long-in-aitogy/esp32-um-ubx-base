@@ -42,9 +42,9 @@ bool useDedicatedBackendPrefs = false;
 
 constexpr size_t MAX_NMEA_PACKET = 512;
 constexpr size_t MAX_RTCM_PACKET = 1030;
-constexpr size_t NMEA_QUEUE_LENGTH = 32;
+constexpr size_t NMEA_QUEUE_LENGTH = 8;
 constexpr size_t RTCM_QUEUE_LENGTH = 4;
-constexpr size_t STATUS_DOCUMENT_SIZE = 16384;
+constexpr size_t STATUS_DOCUMENT_SIZE = 8192;
 constexpr size_t CONFIG_DOCUMENT_SIZE = 4096;
 constexpr size_t COMMAND_DOCUMENT_SIZE = 24576;
 
@@ -1036,23 +1036,20 @@ void BackendAgent::setDetectedChipIfUnknown(const String &chipType) {
 
 bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
     if (!force && sensorType_ != "UNKNOWN" && !sensorType_.isEmpty()) {
-        Serial.printf("[GNSS] Chip da duoc luu tu truoc: %s\n", sensorType_.c_str());
         return true;
     }
-
-    Serial.println("[GNSS] Bat dau tu dong nhan dien loai chip GNSS (Agent Universal logic)...");
 
     while (stream.available()) stream.read();
 
     // 1. Active probe: Unicorecomm (UM980, UM982...)
     stream.print("unlog\r\n");
-    delay(50);
+    delay(30);
     while (stream.available()) stream.read();
 
     stream.print("version\r\n");
     String response = "";
     uint32_t startMs = millis();
-    while (millis() - startMs < 800) {
+    while (millis() - startMs < 500) {
         while (stream.available()) {
             char c = static_cast<char>(stream.read());
             response += c;
@@ -1063,6 +1060,8 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
             response.indexOf("UB4") >= 0 || response.indexOf("#VERSION") >= 0) {
             break;
         }
+        // If no data arrives within 150ms, no Unicore chip is replying
+        if (millis() - startMs > 150 && response.isEmpty()) break;
         delay(10);
     }
 
@@ -1085,7 +1084,7 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
     startMs = millis();
     uint8_t ubxMatch = 0;
     bool foundUblox = false;
-    while (millis() - startMs < 600) {
+    while (millis() - startMs < 400) {
         while (stream.available()) {
             uint8_t b = static_cast<uint8_t>(stream.read());
             if (ubxMatch == 0 && b == 0xB5) ubxMatch = 1;
@@ -1099,6 +1098,8 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
             }
         }
         if (foundUblox) break;
+        // If no bytes arrive within 150ms, no Ublox chip is replying
+        if (millis() - startMs > 150 && ubxMatch == 0 && !stream.available()) break;
         delay(10);
     }
 
@@ -1113,7 +1114,7 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
     // 3. Passive scan: NMEA
     startMs = millis();
     String passiveStr = "";
-    while (millis() - startMs < 800) {
+    while (millis() - startMs < 300) {
         while (stream.available()) {
             uint8_t b = static_cast<uint8_t>(stream.read());
             if (b >= 32 && b <= 126) passiveStr += static_cast<char>(b);
@@ -1126,10 +1127,10 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
             markStatusDirty();
             return true;
         }
+        if (millis() - startMs > 150 && passiveStr.isEmpty() && !stream.available()) break;
         delay(10);
     }
 
-    Serial.println("[GNSS] Khong the tu dong xac dinh chip qua UART1. Giu trang thai UNKNOWN.");
     return false;
 }
 
@@ -1961,7 +1962,7 @@ String BackendAgent::buildStatusPayload() {
     memory["used_mb"] = static_cast<double>(heapUsed) / (1024.0 * 1024.0);
     memory["total_mb"] = static_cast<double>(heapTotal) / (1024.0 * 1024.0);
     memory["percent"] = heapTotal > 0
-        ? 100.0 - (static_cast<double>(heapFree) * 100.0 / heapTotal)
+        ? round((100.0 - (static_cast<double>(heapFree) * 100.0 / heapTotal)) * 10.0) / 10.0
         : 0.0;
 
     JsonObject disk = system.createNestedObject("disk");
@@ -1972,11 +1973,11 @@ String BackendAgent::buildStatusPayload() {
     disk["total_bytes"] = flashTotal;
     disk["free_bytes"] = flashFree;
     disk["used_bytes"] = flashUsed;
-    disk["total_mb"] = static_cast<double>(flashTotal) / (1024.0 * 1024.0);
-    disk["used_mb"] = static_cast<double>(flashUsed) / (1024.0 * 1024.0);
+    disk["total_mb"] = round((static_cast<double>(flashTotal) / (1024.0 * 1024.0)) * 10.0) / 10.0;
+    disk["used_mb"] = round((static_cast<double>(flashUsed) / (1024.0 * 1024.0)) * 10.0) / 10.0;
     disk["total_gb"] = static_cast<double>(flashTotal) / (1024.0 * 1024.0 * 1024.0);
     disk["used_gb"] = static_cast<double>(flashUsed) / (1024.0 * 1024.0 * 1024.0);
-    disk["percent"] = flashTotal > 0 ? (static_cast<double>(flashUsed) * 100.0 / flashTotal) : 0.0;
+    disk["percent"] = flashTotal > 0 ? (round((static_cast<double>(flashUsed) * 1000.0 / flashTotal)) / 10.0) : 0.0;
     system["uptime_seconds"] = millis() / 1000UL;
     system["timestamp"] = timestamp.toInt();
     system["auth_license_bypass"] = false;
@@ -2309,6 +2310,17 @@ void BackendAgent::loop() {
     loopWebsocket();
     drainDataQueues();
     evaluateControlPlaneFailover();
+
+    // If GNSS chip is not yet identified (e.g. user hasn't plugged it in yet at boot),
+    // retry probing Serial1 every 8 seconds until detected
+    if (sensorType_ == "UNKNOWN" || sensorType_.isEmpty()) {
+        const uint32_t now = millis();
+        if (now - lastChipProbeMs_ >= 8000UL && !workflowActive()) {
+            lastChipProbeMs_ = now;
+            detectGnssChip(Serial1);
+        }
+    }
+
     publishStatus(false);
 }
 
