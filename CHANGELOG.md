@@ -102,3 +102,17 @@ Tài liệu này ghi lại chi tiết toàn bộ các cập nhật, tối ưu h�
 * **Giải pháp đã triển khai**:
   * **Giải phóng RAM Bluetooth**: Thêm `esp_bt_controller_mem_release(ESP_BT_MODE_BTDM)` ngay đầu hàm `setup()` trong `src/main.cpp`. Trả ngay lập tức ~35KB DRAM về FreeRTOS Heap (giảm tỷ lệ RAM used từ ~50% xuống còn ~38-40%, tăng vùng nhớ trống lên ~190KB).
   * **Đo chuẩn xác Flash**: Cập nhật `disk["used_bytes"] = ESP.getSketchSize()` và `disk["free_bytes"] = flashTotal - flashUsed` trong `src/functions/Backend_Agent.cpp`. Báo cáo chính xác dung lượng nhị phân firmware đang chiếm (khoảng 0.96MB / 4.0MB Flash ~ 24%), vùng còn lại 3.04MB sẵn sàng cho phân vùng OTA dự phòng và NVS.
+
+---
+
+## 9. Tự động Nhận diện Loại Chip GNSS (Auto-Detect Chip theo chuẩn agent_universal.py)
+* **Tệp thay đổi**: `include/functions/Backend_Agent.h`, `src/functions/Backend_Agent.cpp`, `src/functions/RTCM_Receiver.cpp`, `src/main.cpp`
+* **Bối cảnh & Vấn đề**:
+  * Các mạch ESP32 mới nạp hoặc chưa từng cấu hình Base có giá trị `SENSOR_TYPE` mặc định là `"UNKNOWN"`.
+  * Trên giao diện Dashboard xuất hiện cảnh báo vàng: *"Không thể nhận diện loại chip (hiện tại là: Không xác định). Vui lòng chọn thủ công"*, yêu cầu người dùng phải tự nhớ và chọn tay chip Ublox hay Unicorecomm.
+* **Giải pháp đã triển khai (kế thừa đầy đủ logic từ `cors/geodetic/agent_universal.py`)**:
+  * Hàm `BackendAgent::detectGnssChip(Stream &stream, bool force)` được kích hoạt ngay lúc boot:
+    1. **Active Probe Unicorecomm (UM980, UM982, UB4...)**: Gửi chuỗi lệnh `unlog\r\n` và `version\r\n` qua UART `Serial1`. Quét các từ khóa phản hồi: `UM980`, `UM982`, `UM9`, `Unicore`, `UB4`, `#VERSION`. Nếu khớp, tự động xác định là `Unicorecomm` và lưu NVS.
+    2. **Active Probe U-blox (ZED-F9P, NEO-M8P...)**: Gửi gói tin nhị phân UBX poll `UBX-MON-VER` (`\xB5\x62\x0A\x04\x00\x00\x0E\x34`). Nếu nhận lại header phản hồi `0xB5 0x62 0x0A 0x04`, tự động xác định là `Ublox` và lưu NVS.
+    3. **Passive Scan NMEA/RTCM**: Lắng nghe dòng dữ liệu NMEA lúc khởi động hoặc trong quá trình nhận luồng RTCM (`RTCM_Receiver.cpp`). Nếu phát hiện câu đặc trưng `$PUBX`, tự động nhận dạng là `Ublox`.
+  * Khi nhận diện thành công, chip sẽ tự lưu cấu hình vào Flash NVS, trạm báo thẳng `detected_chip_type` lên CORS Server $\rightarrow$ Biển cảnh báo vàng trên web biến mất hoàn toàn.

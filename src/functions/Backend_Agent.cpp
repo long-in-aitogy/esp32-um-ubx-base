@@ -1025,6 +1025,114 @@ bool BackendAgent::saveStatePreferences() {
     return saved;
 }
 
+void BackendAgent::setDetectedChipIfUnknown(const String &chipType) {
+    if ((sensorType_ == "UNKNOWN" || sensorType_.isEmpty()) && (chipType == "Ublox" || chipType == "Unicorecomm")) {
+        sensorType_ = chipType;
+        saveStatePreferences();
+        Serial.printf("[GNSS] Nhan dien chip thu dong: %s (da luu NVS)\n", sensorType_.c_str());
+        markStatusDirty();
+    }
+}
+
+bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
+    if (!force && sensorType_ != "UNKNOWN" && !sensorType_.isEmpty()) {
+        Serial.printf("[GNSS] Chip da duoc luu tu truoc: %s\n", sensorType_.c_str());
+        return true;
+    }
+
+    Serial.println("[GNSS] Bat dau tu dong nhan dien loai chip GNSS (Agent Universal logic)...");
+
+    while (stream.available()) stream.read();
+
+    // 1. Active probe: Unicorecomm (UM980, UM982...)
+    stream.print("unlog\r\n");
+    delay(50);
+    while (stream.available()) stream.read();
+
+    stream.print("version\r\n");
+    String response = "";
+    uint32_t startMs = millis();
+    while (millis() - startMs < 800) {
+        while (stream.available()) {
+            char c = static_cast<char>(stream.read());
+            response += c;
+            if (response.length() >= 1024) break;
+        }
+        if (response.indexOf("UM980") >= 0 || response.indexOf("UM982") >= 0 ||
+            response.indexOf("UM9") >= 0 || response.indexOf("Unicore") >= 0 ||
+            response.indexOf("UB4") >= 0 || response.indexOf("#VERSION") >= 0) {
+            break;
+        }
+        delay(10);
+    }
+
+    if (response.indexOf("UM980") >= 0 || response.indexOf("UM982") >= 0 ||
+        response.indexOf("UM9") >= 0 || response.indexOf("Unicore") >= 0 ||
+        response.indexOf("UB4") >= 0 || response.indexOf("#VERSION") >= 0) {
+        sensorType_ = "Unicorecomm";
+        saveStatePreferences();
+        Serial.printf("[GNSS] => Phat hien chip: Unicorecomm (phan hoi: %s)\n",
+                      response.substring(0, min((size_t)80, (size_t)response.length())).c_str());
+        markStatusDirty();
+        return true;
+    }
+
+    // 2. Active probe: U-blox (ZED-F9P, NEO-M8P...) via UBX-MON-VER
+    while (stream.available()) stream.read();
+    const uint8_t ubxMonVer[] = {0xB5, 0x62, 0x0A, 0x04, 0x00, 0x00, 0x0E, 0x34};
+    stream.write(ubxMonVer, sizeof(ubxMonVer));
+
+    startMs = millis();
+    uint8_t ubxMatch = 0;
+    bool foundUblox = false;
+    while (millis() - startMs < 600) {
+        while (stream.available()) {
+            uint8_t b = static_cast<uint8_t>(stream.read());
+            if (ubxMatch == 0 && b == 0xB5) ubxMatch = 1;
+            else if (ubxMatch == 1 && b == 0x62) ubxMatch = 2;
+            else if (ubxMatch == 2 && b == 0x0A) ubxMatch = 3;
+            else if (ubxMatch == 3 && b == 0x04) {
+                foundUblox = true;
+                break;
+            } else {
+                ubxMatch = (b == 0xB5) ? 1 : 0;
+            }
+        }
+        if (foundUblox) break;
+        delay(10);
+    }
+
+    if (foundUblox) {
+        sensorType_ = "Ublox";
+        saveStatePreferences();
+        Serial.println("[GNSS] => Phat hien chip: Ublox (ZED-F9P qua UBX-MON-VER)");
+        markStatusDirty();
+        return true;
+    }
+
+    // 3. Passive scan: NMEA
+    startMs = millis();
+    String passiveStr = "";
+    while (millis() - startMs < 800) {
+        while (stream.available()) {
+            uint8_t b = static_cast<uint8_t>(stream.read());
+            if (b >= 32 && b <= 126) passiveStr += static_cast<char>(b);
+            if (passiveStr.length() >= 512) break;
+        }
+        if (passiveStr.indexOf("$PUBX") >= 0) {
+            sensorType_ = "Ublox";
+            saveStatePreferences();
+            Serial.println("[GNSS] => Phat hien chip: Ublox (qua $PUBX NMEA)");
+            markStatusDirty();
+            return true;
+        }
+        delay(10);
+    }
+
+    Serial.println("[GNSS] Khong the tu dong xac dinh chip qua UART1. Giu trang thai UNKNOWN.");
+    return false;
+}
+
 void BackendAgent::setAgentState(const String &state) {
     agentState_ = state;
     agentState_.toLowerCase();

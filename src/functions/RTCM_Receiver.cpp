@@ -81,6 +81,9 @@ void parseNmeaSentence(const String &rawSentence) {
     String sentence = rawSentence;
     sentence.trim();
     if (sentence.length() < 7 || sentence[0] != '$') return;
+    if (sentence.startsWith("$PUBX")) {
+        backendAgent.setDetectedChipIfUnknown("Ublox");
+    }
 
     char line[MAX_NMEA_LENGTH] = {};
     const size_t copyLength = min(sentence.length(), sizeof(line) - 1);

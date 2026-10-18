@@ -66,12 +66,12 @@ void setup() {
     Serial1.begin(GNSS_BAUD, SERIAL_8N1, static_cast<uint8_t>(gnssRX), static_cast<uint8_t>(gnssTX));
     Serial1.setTimeout(100);
 
-    // CORS supplies the receiver type with the base configuration. Do not
-    // send Unicore commands to an unknown (possibly u-blox) receiver at boot.
-
     // Load the serial, token, service configuration and persistent agent state
     // before either transport starts publishing status.
     backendAgent.begin();
+
+    // Auto-detect GNSS receiver chip on Serial1 if not yet known (matches agent_universal.py)
+    backendAgent.detectGnssChip(Serial1);
 
 #ifndef NATIVE_BUILD
     if (isGsmConnection()) {

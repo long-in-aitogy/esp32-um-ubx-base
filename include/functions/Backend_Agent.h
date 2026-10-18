@@ -18,6 +18,9 @@ class BackendAgent {
 public:
     void begin();
     void loop();
+    bool detectGnssChip(Stream &gnssStream, bool force = false);
+    void setDetectedChipIfUnknown(const String &chipType);
+    const String &sensorType() const { return sensorType_; }
 
     void onMqttConnected();
     void onMqttDisconnected();
