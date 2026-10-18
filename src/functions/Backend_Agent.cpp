@@ -1858,11 +1858,11 @@ String BackendAgent::buildStatusPayload() {
 
     JsonObject disk = system.createNestedObject("disk");
     const uint32_t flashTotal = ESP.getFlashChipSize();
-    const uint32_t sketchFree = ESP.getFreeSketchSpace();
-    const uint32_t flashUsed = (flashTotal > sketchFree) ? (flashTotal - sketchFree) : 0;
+    const uint32_t flashUsed = ESP.getSketchSize();
+    const uint32_t flashFree = (flashTotal > flashUsed) ? (flashTotal - flashUsed) : 0;
     disk["type"] = "Flash";
     disk["total_bytes"] = flashTotal;
-    disk["free_bytes"] = sketchFree;
+    disk["free_bytes"] = flashFree;
     disk["used_bytes"] = flashUsed;
     disk["total_mb"] = static_cast<double>(flashTotal) / (1024.0 * 1024.0);
     disk["used_mb"] = static_cast<double>(flashUsed) / (1024.0 * 1024.0);

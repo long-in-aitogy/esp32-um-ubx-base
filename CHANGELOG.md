@@ -91,3 +91,14 @@ Tài liệu này ghi lại chi tiết toàn bộ các cập nhật, tối ưu h�
 * **Giải pháp đã triển khai**:
   * Bổ sung `.clear()` trước mỗi lần `serializeJson()` cho các biến `lastCommandResult_`, `serviceConfig_`, `baseConfig_`.
   * Đảm bảo tính toàn vẹn của dữ liệu trong Flash NVS qua mọi chu kỳ khởi động.
+
+---
+
+## 8. Tối ưu Hóa Bộ nhớ RAM Heap và Độ chính xác Giám sát Flash
+* **Tệp thay đổi**: `src/main.cpp`, `src/functions/Backend_Agent.cpp`
+* **Bối cảnh & Vấn đề**:
+  * ESP32 chạy đồng thời nhiều tác vụ FreeRTOS (4G TinyGSM, MQTT, NTRIP, Command Handler). Vùng nhớ RAM mặc định bị bộ điều khiển Bluetooth chiếm dụng ~35KB dù thiết bị chỉ dùng 4G SIM / WiFi.
+  * Chỉ số Flash trước đó dùng trừ `sketchFree` từ app partition khiến số liệu Flash used bị lệch so với toàn bộ dung lượng chip Flash vật lý (4MB).
+* **Giải pháp đã triển khai**:
+  * **Giải phóng RAM Bluetooth**: Thêm `esp_bt_controller_mem_release(ESP_BT_MODE_BTDM)` ngay đầu hàm `setup()` trong `src/main.cpp`. Trả ngay lập tức ~35KB DRAM về FreeRTOS Heap (giảm tỷ lệ RAM used từ ~50% xuống còn ~38-40%, tăng vùng nhớ trống lên ~190KB).
+  * **Đo chuẩn xác Flash**: Cập nhật `disk["used_bytes"] = ESP.getSketchSize()` và `disk["free_bytes"] = flashTotal - flashUsed` trong `src/functions/Backend_Agent.cpp`. Báo cáo chính xác dung lượng nhị phân firmware đang chiếm (khoảng 0.96MB / 4.0MB Flash ~ 24%), vùng còn lại 3.04MB sẵn sàng cho phân vùng OTA dự phòng và NVS.

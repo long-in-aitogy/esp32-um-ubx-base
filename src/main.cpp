@@ -4,6 +4,7 @@
 #include "functions/cmd_handler.h"
 
 #include <time.h>
+#include "esp_bt.h"
 
 // ================= ĐỊNH NGHĨA CÁC BIẾN TOÀN CỤC =================
 Preferences prefs;
@@ -29,6 +30,9 @@ __attribute__((noreturn)) void taskMQTT([[maybe_unused]] void *parameter);
 __attribute__((noreturn)) void taskSerialCommand([[maybe_unused]] void *parameter);
 
 void setup() {
+    // Release Bluetooth DRAM since BLE/BT is not used, returning ~30-40KB to FreeRTOS heap
+    esp_bt_controller_mem_release(ESP_BT_MODE_BTDM);
+
     Serial.begin(115200);
 #if BOARD_HELTEC
     Mcu.begin(HELTEC_BOARD, SLOW_CLK_TPYE);
