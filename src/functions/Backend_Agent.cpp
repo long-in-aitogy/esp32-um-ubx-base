@@ -42,7 +42,7 @@ bool useDedicatedBackendPrefs = false;
 
 constexpr size_t MAX_NMEA_PACKET = 512;
 constexpr size_t MAX_RTCM_PACKET = 1030;
-constexpr size_t NMEA_QUEUE_LENGTH = 8;
+constexpr size_t NMEA_QUEUE_LENGTH = 16;
 constexpr size_t RTCM_QUEUE_LENGTH = 4;
 constexpr size_t STATUS_DOCUMENT_SIZE = 8192;
 constexpr size_t CONFIG_DOCUMENT_SIZE = 4096;
