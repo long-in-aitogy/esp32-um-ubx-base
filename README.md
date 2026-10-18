@@ -1,17 +1,20 @@
 # ESP32 GNSS Gateway (UM980 / UM982 / u-blox)
 
-Chế độ **base 4G di động** kết nối CORS: nhập tọa độ chính xác, survey-in,
-auto base và khóa trạm. Xem [hướng dẫn kết nối và kiểm tra](docs/base-4g.md).
-Loại GNSS được chọn từ CORS; cùng firmware hỗ trợ Unicore và u-blox.
+Chế độ **base 4G di động** kết nối CORS: nhập tọa độ chính xác (`FIXED_LLA`), survey-in (`SURVEY_IN`), auto base (`AUTO_CORS`) và khóa trạm. 
 
-Firmware dành cho vi điều khiển ESP32 (ví dụ board TDM2402) đóng vai trò làm Gateway kết nối với module GNSS định vị động học thời gian thực (RTK) như Unicore UM980 hoặc UM982. 
+* 📖 **Tài liệu hướng dẫn**: Xem [hướng dẫn kết nối và kiểm tra](docs/base-4g.md).
+* 📝 **Nhật ký thay đổi**: Xem [chi tiết các bản sửa đổi firmware ESP32](CHANGELOG.md).
+
+Loại GNSS được cấu hình từ CORS; cùng một firmware hỗ trợ cả module Unicore (UM980, UM982) và u-blox (ZED-F9P).
 
 ## Tính năng chính
-- **Giao tiếp GNSS**: Đọc dữ liệu NMEA (như `$GNGGA`, `$GPGGA`) từ module UM980/UM982 qua Serial.
-- **Phân tích dữ liệu**: Trích xuất các thông số tọa độ (Latitude, Longitude), số lượng vệ tinh, trạng thái RTK từ chuỗi NMEA và đóng gói thành định dạng JSON.
-- **MQTT Publisher**: Gửi dữ liệu vị trí JSON lên MQTT Broker để giám sát tọa độ theo thời gian thực.
-- **Giám sát trạng thái (Health Check)**: Định kỳ báo cáo các thông số như RAM trống, Uptime, cường độ tín hiệu WiFi, trạng thái MQTT/NTRIP và chất lượng dữ liệu GNSS.
-- **NTRIP Client over IP**: Kết nối đến NTRIP Caster qua mạng IP, nhận dữ liệu cải chính định vị (RTCM) và đẩy ngược lại cho module GNSS để đạt được độ chính xác RTK (mức cm). Hỗ trợ truyền lại chuỗi GGA cho Caster để xác thực.
+- **Chế độ Base 4G di động & Rover**: Hỗ trợ 3 chế độ thiết lập Base: nhập tọa độ cố định (`FIXED_LLA`), khảo sát tự do (`SURVEY_IN`), và tự động đo tọa độ chuẩn qua CORS tham chiếu (`AUTO_CORS`).
+- **Chuyển đổi mượt mà & Chống xung đột**: Tự động ngắt task Auto Base ngầm và nhả UART khi người dùng chuyển sang nạp tọa độ chính xác (`EXECUTE_RAW_COMMANDS`).
+- **Giao tiếp GNSS đa nền tảng**: Nhận diện và tự động định tuyến lệnh log COM (Unicore) hoặc chuyển sang UART1 kèm tính lại checksum Fletcher (u-blox).
+- **Giám sát tài nguyên phần cứng (Telemetry)**: Báo cáo dung lượng RAM Heap (Bytes, KB, MB, %) và bộ nhớ Flash Disk lên CORS Dashboard thời gian thực.
+- **NTRIP Client & Gửi GGA định kỳ**: Tự động gửi câu GGA tức thì khi kết nối và nhắc lại định kỳ 5 giây/lần lên Caster để duy trì kết nối VRS/Auto Base.
+- **Khóa trạm linh hoạt (Scoped Station Lock)**: Hỗ trợ khóa riêng lẻ từng server xuất RTCM (server 1 hoặc server 2) hoặc khóa toàn bộ thiết bị, lưu trạng thái an toàn trong Flash NVS.
+- **MQTT & WebSocket Song song**: Hỗ trợ giao tiếp 2 chiều với CORS Dashboard qua cả MQTT và WebSocket. Cổng WebSocket cấu hình linh hoạt qua NVS.
 
 ## Yêu cầu môi trường và thiết bị
 - Môi trường phát triển: PlatformIO IDE hoặc bất kỳ IDE nào hỗ trợ PlatformIO.
