@@ -282,8 +282,12 @@ void consumeByte(uint8_t value, String &rtcmOutput) {
 } // namespace
 
 String receiveRtcmFromGnss() {
+    if (Serial1.available() <= 0) {
+        return String();
+    }
+
     String rtcmData;
-    rtcmData.reserve(2048);
+    rtcmData.reserve(1024);
     uint8_t buffer[128] = {};
 
     while (Serial1.available() > 0) {
