@@ -103,8 +103,6 @@ void setup() {
     Serial.println("[SETUP] Starting Serial Command task before network setup.");
     xTaskCreatePinnedToCore(taskSerialCommand, "Serial CMD Task", 3072, nullptr, 1, nullptr, 1);
 
-    bool networkConnected = false;
-
 #ifndef NATIVE_BUILD
     if (isGsmConnection()) {
         SerialAT.begin(115200, SERIAL_8N1,
