@@ -1039,96 +1039,153 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
         return true;
     }
 
-    while (stream.available()) stream.read();
+    Serial.printf("\n[GNSS] Bat dau do tim chip tren Serial1 (RX=GPIO %d, TX=GPIO %d)...\n", RX_GNSS, TX_GNSS);
 
-    // 1. Active probe: Unicorecomm (UM980, UM982...)
-    stream.print("unlog\r\n");
-    delay(30);
-    while (stream.available()) stream.read();
+    // Multi-baud scan: 115200 (Unicore/high-speed Ublox), 38400 (ZED-F9P default), 9600 (NEO-M8N default), 460800
+    static constexpr uint32_t BAUD_RATES[] = {115200, 38400, 9600, 460800};
+    bool anyByteSeen = false;
 
-    stream.print("version\r\n");
-    String response = "";
-    uint32_t startMs = millis();
-    while (millis() - startMs < 500) {
+    for (uint32_t baud : BAUD_RATES) {
+#if !defined(NATIVE_BUILD)
+        Serial1.end();
+        Serial1.begin(baud, SERIAL_8N1, static_cast<uint8_t>(RX_GNSS), static_cast<uint8_t>(TX_GNSS));
+        Serial1.setTimeout(100);
+#endif
+        delay(30);
+
         while (stream.available()) {
-            char c = static_cast<char>(stream.read());
-            response += c;
-            if (response.length() >= 1024) break;
+            anyByteSeen = true;
+            stream.read();
         }
+
+        // Check if data is already streaming in passively (NMEA, RTCM)
+        uint32_t passiveStart = millis();
+        String passiveChunk = "";
+        while (millis() - passiveStart < 350) {
+            while (stream.available()) {
+                anyByteSeen = true;
+                uint8_t b = static_cast<uint8_t>(stream.read());
+                if (b >= 32 && b <= 126) passiveChunk += static_cast<char>(b);
+                if (passiveChunk.length() >= 256) break;
+            }
+            if (passiveChunk.length() >= 10) break;
+            delay(10);
+        }
+
+        if (!passiveChunk.isEmpty()) {
+            Serial.printf("[GNSS] Phat hien luong du lieu tai baud %u: %s\n",
+                          baud, passiveChunk.substring(0, min((size_t)60, (size_t)passiveChunk.length())).c_str());
+            if (passiveChunk.indexOf("$PUBX") >= 0) {
+                sensorType_ = "Ublox";
+                saveStatePreferences();
+                Serial.printf("[GNSS] => Phat hien chip: Ublox (qua $PUBX tai baud %u)\n", baud);
+                markStatusDirty();
+                return true;
+            }
+            if (passiveChunk.indexOf("UM9") >= 0 || passiveChunk.indexOf("Unicore") >= 0 ||
+                passiveChunk.indexOf("#VERSION") >= 0) {
+                sensorType_ = "Unicorecomm";
+                saveStatePreferences();
+                Serial.printf("[GNSS] => Phat hien chip: Unicorecomm tai baud %u\n", baud);
+                markStatusDirty();
+                return true;
+            }
+        }
+
+        // 1. Active probe: Unicorecomm (UM980, UM982...)
+        while (stream.available()) stream.read();
+        stream.print("unlog\r\n");
+        delay(40);
+        while (stream.available()) stream.read();
+
+        stream.print("version\r\n");
+        String response = "";
+        uint32_t startMs = millis();
+        while (millis() - startMs < 500) {
+            while (stream.available()) {
+                anyByteSeen = true;
+                char c = static_cast<char>(stream.read());
+                response += c;
+                if (response.length() >= 512) break;
+            }
+            if (response.indexOf("UM980") >= 0 || response.indexOf("UM982") >= 0 ||
+                response.indexOf("UM9") >= 0 || response.indexOf("Unicore") >= 0 ||
+                response.indexOf("UB4") >= 0 || response.indexOf("#VERSION") >= 0) {
+                break;
+            }
+            delay(15);
+        }
+
         if (response.indexOf("UM980") >= 0 || response.indexOf("UM982") >= 0 ||
             response.indexOf("UM9") >= 0 || response.indexOf("Unicore") >= 0 ||
             response.indexOf("UB4") >= 0 || response.indexOf("#VERSION") >= 0) {
-            break;
-        }
-        // If no data arrives within 150ms, no Unicore chip is replying
-        if (millis() - startMs > 150 && response.isEmpty()) break;
-        delay(10);
-    }
-
-    if (response.indexOf("UM980") >= 0 || response.indexOf("UM982") >= 0 ||
-        response.indexOf("UM9") >= 0 || response.indexOf("Unicore") >= 0 ||
-        response.indexOf("UB4") >= 0 || response.indexOf("#VERSION") >= 0) {
-        sensorType_ = "Unicorecomm";
-        saveStatePreferences();
-        Serial.printf("[GNSS] => Phat hien chip: Unicorecomm (phan hoi: %s)\n",
-                      response.substring(0, min((size_t)80, (size_t)response.length())).c_str());
-        markStatusDirty();
-        return true;
-    }
-
-    // 2. Active probe: U-blox (ZED-F9P, NEO-M8P...) via UBX-MON-VER
-    while (stream.available()) stream.read();
-    const uint8_t ubxMonVer[] = {0xB5, 0x62, 0x0A, 0x04, 0x00, 0x00, 0x0E, 0x34};
-    stream.write(ubxMonVer, sizeof(ubxMonVer));
-
-    startMs = millis();
-    uint8_t ubxMatch = 0;
-    bool foundUblox = false;
-    while (millis() - startMs < 400) {
-        while (stream.available()) {
-            uint8_t b = static_cast<uint8_t>(stream.read());
-            if (ubxMatch == 0 && b == 0xB5) ubxMatch = 1;
-            else if (ubxMatch == 1 && b == 0x62) ubxMatch = 2;
-            else if (ubxMatch == 2 && b == 0x0A) ubxMatch = 3;
-            else if (ubxMatch == 3 && b == 0x04) {
-                foundUblox = true;
-                break;
-            } else {
-                ubxMatch = (b == 0xB5) ? 1 : 0;
-            }
-        }
-        if (foundUblox) break;
-        // If no bytes arrive within 150ms, no Ublox chip is replying
-        if (millis() - startMs > 150 && ubxMatch == 0 && !stream.available()) break;
-        delay(10);
-    }
-
-    if (foundUblox) {
-        sensorType_ = "Ublox";
-        saveStatePreferences();
-        Serial.println("[GNSS] => Phat hien chip: Ublox (ZED-F9P qua UBX-MON-VER)");
-        markStatusDirty();
-        return true;
-    }
-
-    // 3. Passive scan: NMEA
-    startMs = millis();
-    String passiveStr = "";
-    while (millis() - startMs < 300) {
-        while (stream.available()) {
-            uint8_t b = static_cast<uint8_t>(stream.read());
-            if (b >= 32 && b <= 126) passiveStr += static_cast<char>(b);
-            if (passiveStr.length() >= 512) break;
-        }
-        if (passiveStr.indexOf("$PUBX") >= 0) {
-            sensorType_ = "Ublox";
+            sensorType_ = "Unicorecomm";
             saveStatePreferences();
-            Serial.println("[GNSS] => Phat hien chip: Ublox (qua $PUBX NMEA)");
+            Serial.printf("[GNSS] => Phat hien chip: Unicorecomm tai baud %u (phan hoi: %s)\n",
+                          baud, response.substring(0, min((size_t)80, (size_t)response.length())).c_str());
             markStatusDirty();
             return true;
         }
-        if (millis() - startMs > 150 && passiveStr.isEmpty() && !stream.available()) break;
-        delay(10);
+
+        // 2. Active probe: U-blox (ZED-F9P, NEO-M8P...) via UBX-MON-VER
+        while (stream.available()) stream.read();
+        const uint8_t ubxMonVer[] = {0xB5, 0x62, 0x0A, 0x04, 0x00, 0x00, 0x0E, 0x34};
+        stream.write(ubxMonVer, sizeof(ubxMonVer));
+
+        startMs = millis();
+        uint8_t ubxMatch = 0;
+        bool foundUblox = false;
+        while (millis() - startMs < 450) {
+            while (stream.available()) {
+                anyByteSeen = true;
+                uint8_t b = static_cast<uint8_t>(stream.read());
+                if (ubxMatch == 0 && b == 0xB5) ubxMatch = 1;
+                else if (ubxMatch == 1 && b == 0x62) ubxMatch = 2;
+                else if (ubxMatch == 2 && b == 0x0A) ubxMatch = 3;
+                else if (ubxMatch == 3 && b == 0x04) {
+                    foundUblox = true;
+                    break;
+                } else {
+                    ubxMatch = (b == 0xB5) ? 1 : 0;
+                }
+            }
+            if (foundUblox) break;
+            delay(15);
+        }
+
+        if (foundUblox) {
+            sensorType_ = "Ublox";
+            saveStatePreferences();
+            Serial.printf("[GNSS] => Phat hien chip: Ublox (ZED-F9P qua UBX-MON-VER tai baud %u)\n", baud);
+            markStatusDirty();
+            return true;
+        }
+
+        // 3. Fallback: Check if generic NMEA ($GNGGA, $GNRMC, etc.)
+        if (passiveChunk.indexOf("$G") >= 0) {
+            sensorType_ = "Ublox";
+            saveStatePreferences();
+            Serial.printf("[GNSS] => Nhan dang chip qua luong NMEA ($G...): Ublox (baud %u)\n", baud);
+            markStatusDirty();
+            return true;
+        }
+    }
+
+    // Reset back to standard GNSS_BAUD (115200) if no chip responded
+#if !defined(NATIVE_BUILD)
+    Serial1.end();
+    Serial1.begin(GNSS_BAUD, SERIAL_8N1, static_cast<uint8_t>(RX_GNSS), static_cast<uint8_t>(TX_GNSS));
+    Serial1.setTimeout(100);
+#endif
+
+    if (!anyByteSeen) {
+        Serial.println("[GNSS][CANH BAO] KHONG NHAN DUOC BAT KY BYTE NAO tu RX (GPIO 18)!");
+        Serial.println("[GNSS][CANH BAO] Kiem tra ngay:");
+        Serial.println("  1. DA NOI NGUOC DAY TX/RX? (GPIO 18 phai noi vao TX chip, GPIO 19 noi vao RX chip)");
+        Serial.println("  2. NGUON CHIP: Chip GNSS da cap VCC (3.3V/5V) va GND chung voi ESP32 chua?");
+        Serial.println("  3. DEN TIN HIEU: Den LED nguon (PWR) tren mach GNSS co sang khong?");
+    } else {
+        Serial.println("[GNSS][THONG BAO] Co nhan duoc byte tu GPIO 18 nhung chua xac dinh duoc loai chip. Se thu lai...");
     }
 
     return false;

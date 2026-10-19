@@ -91,7 +91,7 @@ void setup() {
     backendAgent.begin();
 
     // Auto-detect GNSS receiver chip on Serial1 if not yet known (matches agent_universal.py)
-    backendAgent.detectGnssChip(Serial1);
+    backendAgent.detectGnssChip(Serial1, true);
 
 #ifndef NATIVE_BUILD
     if (isGsmConnection()) {
