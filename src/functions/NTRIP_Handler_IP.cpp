@@ -6,6 +6,7 @@
 #include "functions/Backend_Agent.h"
 #include "functions/RTCM_Receiver.h"
 #include "hardware/Sim_handler.h"
+#include "hardware/Wifi_handler.h"
 
 #include <ArduinoJson.h>
 #include <Preferences.h>
@@ -115,7 +116,7 @@ void loadEndpoints() {
     String legacyPassword;
     uint16_t legacyPort = NTRIP_CASTER_PORT;
     prefs.begin("myPrefs", true);
-    legacyHost = prefs.getString("NTRIP_SERVER", String(NTRIP_CASTER_IP));
+    legacyHost = prefs.getString("NTRIP_SERVER", String(NTRIP_CASTER_ADDRESS));
     legacyPort = prefs.getUShort("NTRIP_PORT", NTRIP_CASTER_PORT);
     legacyMountpoint = prefs.getString("NTRIP_MPT", String(NTRIP_MOUNTPOINT));
     legacyPassword = prefs.getString("NT_AUTH_BS", String(NTRIP_AUTH_BASE_STATION));

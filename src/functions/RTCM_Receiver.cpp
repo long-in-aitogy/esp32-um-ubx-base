@@ -302,10 +302,6 @@ String receiveRtcmFromGnss() {
     }
 
     if (!rtcmData.isEmpty()) {
-        analyzeRtcmFrames(rtcmData);
-    }
-
-    if (!rtcmData.isEmpty()) {
         constexpr uint16_t supportedRtcmTypes[] = {
             1005, 1074, 1077, 1084, 1087,
             1094, 1097, 1124, 1127, 1230,

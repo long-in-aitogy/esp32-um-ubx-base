@@ -22,6 +22,8 @@ inline constexpr int TX_GNSS = 19; // Nối RXD (Hàng dưới) của UM980
 inline constexpr int LED_PIN = 2;
 #endif
 inline constexpr int GNSS_BAUD = 115200;
+// UART on the Unicore receiver connected to the ESP32 GNSS link.
+inline constexpr uint8_t GNSS_UNICORE_PORT = 2;
 
 // ================= CẤU HÌNH CÁC TASK =================
 inline constexpr int MUTEX_TIMEOUT_MS = 1500; // Thời gian tối đa để chờ mutex (ms)

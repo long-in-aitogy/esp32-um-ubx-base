@@ -12,9 +12,19 @@ Preferences prefs;
 extern PubSubClient mqtt;
 
 namespace {
+    constexpr uint8_t CONNECTION_FAIL_LIMIT = 5;
+    constexpr uint32_t GNSS_DATA_TIMEOUT_MS = 5000;
+
+    struct RtcmState {
+        uint32_t lastGnssReceptionMs = 0;
+        bool hasGnssReception = false;
+        RtcmMessageCounts messageCounts;
+    };
+
     class DeviceRuntime {
     public:
         inline static uint8_t mqttDisconnectCount = 0;
+        inline static uint8_t ntripDisconnectCount = 0;
         inline static uint8_t gsmDisconnectCount = 0;
     };
 }
@@ -26,29 +36,30 @@ void initPrefs();
 static void serviceMqtt(const bool reconnect);
 static void settleModemBeforeNtrip();
 
-__attribute__((noreturn)) void taskNtrip([[maybe_unused]] void* const parameter);
-__attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void* const parameter);
-__attribute__((noreturn)) void taskMQTT([[maybe_unused]] void* const parameter);
-__attribute__((noreturn)) void taskSerialCommand([[maybe_unused]] void* const parameter);
-
 __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter);
+__attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void *parameter);
 __attribute__((noreturn)) void taskMQTT([[maybe_unused]] void *parameter);
 __attribute__((noreturn)) void taskSerialCommand([[maybe_unused]] void *parameter);
 
 void setup() {
-    // Release Bluetooth DRAM since BLE/BT is not used, returning ~30-40KB to FreeRTOS heap
-    esp_bt_controller_mem_release(ESP_BT_MODE_BTDM);
-
+    static RtcmState rtcmState;
     Serial.begin(115200);
 #if BOARD_HELTEC
-    Mcu.begin(HELTEC_BOARD, SLOW_CLK_TPYE);
+    // ESP32-S3 uses native USB CDC. Give the monitor a short opportunity to
+    // connect so the startup banner is not lost immediately after reset.
+    const uint32_t usbCdcWaitStarted = millis();
+    while (!Serial && millis() - usbCdcWaitStarted < 3000) {
+        delay(10);
+    }
 #endif
-    delay(100);
 
     Serial.println("[DEBUG] Serial initialized");
     Serial.println("\n=========================================");
     Serial.println("     ESP32 GNSS GATEWAY KHOI DONG        ");
     Serial.println("=========================================");
+
+    // Release Bluetooth DRAM since BLE/BT is not used, returning ~30-40KB to FreeRTOS heap
+    esp_bt_controller_mem_release(ESP_BT_MODE_BTDM);
 
     prefs.begin("myPrefs");
     const bool needReset = prefs.getBool("NEED_RESET", true);
@@ -100,12 +111,12 @@ void setup() {
         if (networkConnected) {
             Serial.println("[SETUP] Ket noi mang thanh cong!");
             setupNTRIP();
-            deviceHealth::ntripDisconnectCount = 0;
+            DeviceRuntime::ntripDisconnectCount = 0;
             if (isGsmConnection()) {
                 settleModemBeforeNtrip();
             }
             connectNTRIP();
-            deviceHealth::mqttDisconnectCount = 0;
+            DeviceRuntime::mqttDisconnectCount = 0;
             setupMQTT();
         } else {
             Serial.println("[ERROR] Khong the ket noi mang. Vui long kiem tra cau hinh va thu lai.");
@@ -141,14 +152,9 @@ void setup() {
     xTaskCreatePinnedToCore(taskNtrip, "NTRIP Task", 4096, &rtcmState, 2, nullptr, 1);
     Serial.println("[SETUP] Da khoi dong Task NTRIP!");
 
-    setupMQTT();
-#if RTCM_COMMUNICATION_PROTOCOL == TCP_IP
-    setupNTRIP();
-#endif
-
-    xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", 6144, nullptr, 3, nullptr, 1);
-    xTaskCreatePinnedToCore(taskSerialCommand, "Serial CMD Task", 2048, nullptr, 1, nullptr, 1);
-    xTaskCreatePinnedToCore(taskNtrip, "NTRIP Task", 5120, nullptr, 2, nullptr, 1);
+    Serial.println("[SETUP] Task Health: Gui thong tin suc khoe thiet bi len MQTT moi 30s");
+    xTaskCreatePinnedToCore(healthCheckTask, "Health Task", 4096, &rtcmState, 1, nullptr, 1);
+    Serial.println("[SETUP] Da khoi dong Task Health!");
 
     Serial.println("=========================================");
     Serial.println("        KHOI DONG HOAN TAT               ");
@@ -159,11 +165,17 @@ void setup() {
 }
 
 __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter) {
+    auto* const rtcmState = static_cast<RtcmState*>(parameter);
     Serial.println("[NTRIP TASK] Bat dau task NTRIP...");
+    int loopStatus = 0;
     while (true) {
         String rtcmRead;
         if (rtcmBufferMutex && xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
             rtcmRead = receiveRtcmFromGnss();
+            if (!rtcmRead.isEmpty()) {
+                rtcmState->lastGnssReceptionMs = millis();
+                rtcmState->hasGnssReception = true;
+            }
             xSemaphoreGive(rtcmBufferMutex);
         }
 
@@ -174,7 +186,7 @@ __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter) {
                 xSemaphoreGive(tcpStreamMutex);
             }
             if (!gprsConnected) {
-                if (++deviceHealth::gsmDisconnectCount >= CONNECTION_FAIL_LIMIT) {
+                if (++DeviceRuntime::gsmDisconnectCount >= CONNECTION_FAIL_LIMIT) {
                     Serial.println("[GSM TASK][ERROR] GPRS mat ket noi qua 5 lan, khoi dong lai ESP32...");
                     shutdownTcpTransportBeforeRestart();
                     ESP.restart();
@@ -182,7 +194,7 @@ __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter) {
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 continue;
             }
-            deviceHealth::gsmDisconnectCount = 0;
+            DeviceRuntime::gsmDisconnectCount = 0;
         }
         if (xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
             if (loopStatus == 504) {
@@ -191,16 +203,16 @@ __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter) {
             }
             loopStatus = loopNTRIP(rtcmRead);
             xSemaphoreGive(tcpStreamMutex);
-            deviceHealth::ntripDisconnectCount++;
+            ++DeviceRuntime::ntripDisconnectCount;
             if (
                 (loopStatus == 500 || loopStatus == 504 || !isNtripConnected())
-                && deviceHealth::ntripDisconnectCount >= CONNECTION_FAIL_LIMIT
+                && DeviceRuntime::ntripDisconnectCount >= CONNECTION_FAIL_LIMIT
             ) {
                     Serial.println("[NTRIP TASK][ERROR] NTRIP mat ket noi qua 5 lan, khoi dong lai ESP32...");
                     shutdownTcpTransportBeforeRestart();
                     ESP.restart();
             } else {
-                deviceHealth::ntripDisconnectCount = 0;
+                DeviceRuntime::ntripDisconnectCount = 0;
             }
             #if PROGRAM_DEBUG
             Serial.println("[NTRIP TASK] loopNTRIP() tra ve: " + String(loopStatus));
@@ -214,9 +226,8 @@ __attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void* const para
     // Có tranh chấp tài nguyên với task RTCM và NTRIP publish
     String healthPayload = "";
     uint32_t loopStartTime = 0;
-    uint32_t remainingWait = 0;
     while (true) {
-        loopStartTime = millis();
+        const uint32_t loopStartTime = millis();
         int32_t signalQualityDbm = -1;
         if (xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)))
         {
@@ -234,22 +245,9 @@ __attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void* const para
                                                    messageCounts.values);
             xSemaphoreGive(rtcmBufferMutex);
         }
-        vTaskDelay(1);
-        Serial.print("[HEALTH CHECK] ");
-        Serial.println(healthPayload);
-
-        if (healthPayload.isEmpty())
-        {
-            if (HEALTH_INTERVAL > (millis() - loopStartTime)) {
-                remainingWait = HEALTH_INTERVAL - (millis() - loopStartTime);
-            } else {
-                DeviceRuntime::gsmDisconnectCount = 0;
-                loopNTRIP(rtcmRead);
-            }
-            xSemaphoreGive(tcpStreamMutex);
-        }
-#endif
-        vTaskDelay(pdMS_TO_TICKS(100));
+        if (!healthPayload.isEmpty()) publishHealth(healthPayload);
+        const uint32_t elapsed = millis() - loopStartTime;
+        vTaskDelay(pdMS_TO_TICKS(elapsed < HEALTH_INTERVAL ? HEALTH_INTERVAL - elapsed : 1));
     }
 }
 
