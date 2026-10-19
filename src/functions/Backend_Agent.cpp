@@ -961,7 +961,7 @@ void BackendAgent::ensureDefaultServiceConfig() {
     }
 
     prefs.begin("myPrefs", true);
-    const String host = prefs.getString("NTRIP_SERVER", String(NTRIP_CASTER_IP));
+    const String host = prefs.getString("NTRIP_SERVER", String(NTRIP_CASTER_ADDRESS));
     const uint16_t port = prefs.getUShort("NTRIP_PORT", NTRIP_CASTER_PORT);
     String mountpoint = prefs.getString("NTRIP_MPT", String(NTRIP_MOUNTPOINT));
     const String password = prefs.getString("NT_AUTH_BS", String(NTRIP_AUTH_BASE_STATION));
@@ -1401,7 +1401,8 @@ bool BackendAgent::writeGnssCommands(const UbxCmdBuilder::CommandList &commands)
 bool BackendAgent::applyRoverMode() {
     if (sensorType_ != "Ublox" && sensorType_ != "Unicorecomm") return false;
     return writeGnssCommands(UbxCmdBuilder::buildRoverCommand(
-        sensorType_ == "Ublox" ? GNSS_MODULE_TYPE_UBLOX : GNSS_MODULE_TYPE_UNICORE));
+        sensorType_ == "Ublox" ? UbxCmdBuilder::GnssSensorType::Ublox
+                                : UbxCmdBuilder::GnssSensorType::Unicore));
 }
 
 bool BackendAgent::applyBaseCoordinates(const double latitude, const double longitude,

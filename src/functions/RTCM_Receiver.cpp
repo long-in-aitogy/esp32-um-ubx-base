@@ -302,7 +302,7 @@ String receiveRtcmFromGnss() {
     }
 
     if (!rtcmData.isEmpty()) {
-        Serial.println("[UM980] Da nhan khung RTCM opaque. So byte: " + String(rtcmData.length()));
+        Serial.println("[UM980] Da nhan du lieu RTCM tu mach RTK. So byte: " + String(rtcmData.length()));
     }
     return rtcmData;
 }

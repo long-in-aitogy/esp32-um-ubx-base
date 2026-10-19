@@ -74,7 +74,10 @@ namespace UbxCmdBuilder
     CommandList buildBaseRtcmOutputCommand(const String &message,
                                                                                      const String &port, bool enabled,
                                                                                      GnssSensorType sensorType);
-    CommandList buildRoverCommand(int moduleType);
+    CommandList buildRoverCommand(GnssSensorType sensorType);
+    inline CommandList buildRoverCommand(int moduleType) {
+        return buildRoverCommand(moduleType == GNSS_MODULE_TYPE_UNICORE ? GnssSensorType::Unicore : GnssSensorType::Ublox);
+    }
     void routeUbloxOutput(uint8_t *data, size_t length);
     CommandList buildGeotekLteUnicoreConfig(const String &setupMethod, uint32_t duration = 60,
                                             double lat = 0, double lon = 0, double alt = 0);

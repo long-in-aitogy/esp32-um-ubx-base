@@ -1,4 +1,5 @@
 #include "functions/ubx_cmd_builder.h"
+#include "Prog_Config.h"
 #include <array>
 
 #include <algorithm>
@@ -480,16 +481,15 @@ namespace UbxCmdBuilder
         return commands;
     }
 
-    CommandList buildRoverCommand(int moduleType)
+    CommandList buildRoverCommand(GnssSensorType sensorType)
     {
-        if (moduleType == GNSS_MODULE_TYPE_UNICORE) {
+        if (sensorType == GnssSensorType::Unicore) {
             const String port = "com" + String(GNSS_UNICORE_PORT);
             return {asciiCommand("mode rover\r\n"),
                     asciiCommand("gpgga " + port + " 1\r\n"),
                     asciiCommand("gpgst " + port + " 1\r\n"),
                     asciiCommand("saveconfig\r\n")};
         }
-        if (moduleType != GNSS_MODULE_TYPE_UBLOX) return {};
         // Same UART1 protocol gates and TMODE disable as the Python agent.
         Command input = ubxCfgValsetU1({{0x10730001, true}, {0x10730004, true},
                                       {0x10740001, true}, {0x10740002, true},
