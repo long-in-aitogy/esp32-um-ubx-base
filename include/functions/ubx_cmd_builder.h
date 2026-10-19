@@ -12,6 +12,12 @@ namespace UbxCmdBuilder
     using Command = std::vector<uint8_t>;
     using CommandList = std::vector<Command>;
 
+    enum class GnssSensorType
+    {
+        Ublox,
+        Unicore
+    };
+
     enum class OutputMode
     {
         DiagnosticsRtcm,
@@ -38,16 +44,18 @@ namespace UbxCmdBuilder
     };
 
     GnssOptions normalizeGnssOptions(GnssOptions options = {});
+        GnssSensorType sensorTypeFromString(const String &sensorType);
     Command buildUbloxOutputConfigCommand(const GnssOptions &options = {});
     CommandList buildBaseSurveyInCommand(uint32_t duration,
-                                         float accuracy, const GnssOptions &options = {},
-                                         int moduleType = GNSS_MODULE_TYPE);
+                                                                                 float accuracy, GnssSensorType sensorType,
+                                                                                 const GnssOptions &options = {});
     CommandList buildBaseFixedLlaCommand(double lat, double lon,
                                          double alt, float accuracy,
-                                         const GnssOptions &options = {},
-                                         int moduleType = GNSS_MODULE_TYPE);
-    CommandList buildRoverCommand(int moduleType);
-    void routeUbloxOutput(uint8_t *data, size_t length);
+                                                                                 GnssSensorType sensorType,
+                                         const GnssOptions &options = {});
+    CommandList buildBaseRtcmOutputCommand(const String &message,
+                                                                                     const String &port, bool enabled,
+                                                                                     GnssSensorType sensorType);
     CommandList buildGeotekLteUnicoreConfig(const String &setupMethod, uint32_t duration = 60,
                                             double lat = 0, double lon = 0, double alt = 0);
     Command commandListToBytes(const CommandList &commands);

@@ -23,7 +23,13 @@ SemaphoreHandle_t rtcmBufferMutex = nullptr;
 SemaphoreHandle_t tcpStreamMutex = nullptr;
 
 void initPrefs();
-static void serviceMqtt(bool reconnect);
+static void serviceMqtt(const bool reconnect);
+static void settleModemBeforeNtrip();
+
+__attribute__((noreturn)) void taskNtrip([[maybe_unused]] void* const parameter);
+__attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void* const parameter);
+__attribute__((noreturn)) void taskMQTT([[maybe_unused]] void* const parameter);
+__attribute__((noreturn)) void taskSerialCommand([[maybe_unused]] void* const parameter);
 
 __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter);
 __attribute__((noreturn)) void taskMQTT([[maybe_unused]] void *parameter);
@@ -54,10 +60,10 @@ void setup() {
     }
 
     loadConnectionTypeFromPrefs();
-    const int gnssTX = prefs.getInt("GNSS_TX", TX_GNSS);
-    const int gnssRX = prefs.getInt("GNSS_RX", RX_GNSS);
-    const int rx2ModemTX = prefs.getInt("RX_TO_MODEM_TX", RX_TO_MODEM_TX);
-    const int tx2ModemRX = prefs.getInt("TX_TO_MODEM_RX", TX_TO_MODEM_RX);
+    const int gnssTX = TX_GNSS;
+    const int gnssRX = RX_GNSS;
+    const int rx2ModemTX = RX_TO_MODEM_TX;
+    const int tx2ModemRX = TX_TO_MODEM_RX;
     prefs.end();
 
     (void)restartCount;
@@ -91,9 +97,18 @@ void setup() {
             DeviceRuntime::gsmDisconnectCount = 0;
             networkConnected = startSIM() && connectGSM();
         }
-        if (!networkConnected) {
-            Serial.println("[ERROR] Khong the ket noi mang, thu lai sau 2 giay.");
-            delay(2000);
+        if (networkConnected) {
+            Serial.println("[SETUP] Ket noi mang thanh cong!");
+            setupNTRIP();
+            deviceHealth::ntripDisconnectCount = 0;
+            if (isGsmConnection()) {
+                settleModemBeforeNtrip();
+            }
+            connectNTRIP();
+            deviceHealth::mqttDisconnectCount = 0;
+            setupMQTT();
+        } else {
+            Serial.println("[ERROR] Khong the ket noi mang. Vui long kiem tra cau hinh va thu lai.");
         }
     }
 
@@ -101,9 +116,30 @@ void setup() {
     configTime(0, 0, "pool.ntp.org", "time.google.com");
 
     rtcmBufferMutex = xSemaphoreCreateMutex();
-    while (!rtcmBufferMutex) rtcmBufferMutex = xSemaphoreCreateMutex();
+    while (rtcmBufferMutex == nullptr) {
+        Serial.println("[ERROR] Tao mutex rtcmDataMutex that bai! Dang thu lai...");
+        rtcmBufferMutex = xSemaphoreCreateMutex();
+    }
+    Serial.println("[SETUP] Tao mutex rtcmDataMutex thanh cong!");
+
     tcpStreamMutex = xSemaphoreCreateMutex();
-    while (!tcpStreamMutex) tcpStreamMutex = xSemaphoreCreateMutex();
+    while (tcpStreamMutex == nullptr) {
+        Serial.println("[ERROR] Tao mutex tcpStreamMutex that bai! Dang thu lai...");
+        tcpStreamMutex = xSemaphoreCreateMutex();
+    }
+    Serial.println("[SETUP] Tao mutex tcpStreamMutex thanh cong!");
+
+    Serial.println("[SETUP] Task MQTT: Quan ly ket noi MQTT va callback.");
+    xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", 4096, nullptr, 3, nullptr, 1);
+    Serial.println("[SETUP] Da khoi dong Task MQTT!");
+
+    Serial.println("[SETUP] Task Serial Command: Lang nghe lenh tu Serial moi 500 ms.");
+    xTaskCreatePinnedToCore(taskSerialCommand, "Serial CMD Task", 3072, nullptr, 1, nullptr, 1);
+    Serial.println("[SETUP] Da khoi dong Task Serial Command!");
+
+    Serial.println("[SETUP] Task NTRIP: Gui du lieu RTCM qua NTRIP.");
+    xTaskCreatePinnedToCore(taskNtrip, "NTRIP Task", 4096, &rtcmState, 2, nullptr, 1);
+    Serial.println("[SETUP] Da khoi dong Task NTRIP!");
 
     setupMQTT();
 #if RTCM_COMMUNICATION_PROTOCOL == TCP_IP
@@ -131,12 +167,81 @@ __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter) {
             xSemaphoreGive(rtcmBufferMutex);
         }
 
-#if RTCM_COMMUNICATION_PROTOCOL == TCP_IP
-        if (tcpStreamMutex && xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
-            if (isGsmConnection() && !modem.isGprsConnected()) {
-                DeviceRuntime::gsmDisconnectCount++;
-                stopNtrip();
-                if (connectGSM()) DeviceRuntime::gsmDisconnectCount = 0;
+        if (isGsmConnection()) {
+            bool gprsConnected = false;
+            if (xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
+                gprsConnected = modem.isGprsConnected();
+                xSemaphoreGive(tcpStreamMutex);
+            }
+            if (!gprsConnected) {
+                if (++deviceHealth::gsmDisconnectCount >= CONNECTION_FAIL_LIMIT) {
+                    Serial.println("[GSM TASK][ERROR] GPRS mat ket noi qua 5 lan, khoi dong lai ESP32...");
+                    shutdownTcpTransportBeforeRestart();
+                    ESP.restart();
+                }
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+            deviceHealth::gsmDisconnectCount = 0;
+        }
+        if (xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
+            if (loopStatus == 504) {
+                Serial.println("[NTRIP TASK] Dang thu ket noi lai NTRIP...");
+                connectNTRIP();
+            }
+            loopStatus = loopNTRIP(rtcmRead);
+            xSemaphoreGive(tcpStreamMutex);
+            deviceHealth::ntripDisconnectCount++;
+            if (
+                (loopStatus == 500 || loopStatus == 504 || !isNtripConnected())
+                && deviceHealth::ntripDisconnectCount >= CONNECTION_FAIL_LIMIT
+            ) {
+                    Serial.println("[NTRIP TASK][ERROR] NTRIP mat ket noi qua 5 lan, khoi dong lai ESP32...");
+                    shutdownTcpTransportBeforeRestart();
+                    ESP.restart();
+            } else {
+                deviceHealth::ntripDisconnectCount = 0;
+            }
+            #if PROGRAM_DEBUG
+            Serial.println("[NTRIP TASK] loopNTRIP() tra ve: " + String(loopStatus));
+            #endif
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+}
+__attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void* const parameter) {
+    auto* const rtcmState = static_cast<RtcmState*>(parameter);
+    // Có tranh chấp tài nguyên với task RTCM và NTRIP publish
+    String healthPayload = "";
+    uint32_t loopStartTime = 0;
+    uint32_t remainingWait = 0;
+    while (true) {
+        loopStartTime = millis();
+        int32_t signalQualityDbm = -1;
+        if (xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)))
+        {
+            if (isGsmConnection()) {
+                if (xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
+                    signalQualityDbm = modem.getSignalQuality();
+                    xSemaphoreGive(tcpStreamMutex);
+                }
+            }
+            const bool gnssDataOk = rtcmState->hasGnssReception
+                && millis() - rtcmState->lastGnssReceptionMs <= GNSS_DATA_TIMEOUT_MS;
+            const RtcmMessageCounts messageCounts = rtcmState->messageCounts;
+            rtcmState->messageCounts = {};
+            healthPayload = formDeviceHealthString(signalQualityDbm, gnssDataOk,
+                                                   messageCounts.values);
+            xSemaphoreGive(rtcmBufferMutex);
+        }
+        vTaskDelay(1);
+        Serial.print("[HEALTH CHECK] ");
+        Serial.println(healthPayload);
+
+        if (healthPayload.isEmpty())
+        {
+            if (HEALTH_INTERVAL > (millis() - loopStartTime)) {
+                remainingWait = HEALTH_INTERVAL - (millis() - loopStartTime);
             } else {
                 DeviceRuntime::gsmDisconnectCount = 0;
                 loopNTRIP(rtcmRead);
@@ -201,35 +306,44 @@ void loop() {
     vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
+static void settleModemBeforeNtrip() {
+    Serial.println("[SETUP][NTRIP] Cho modem on dinh truoc khi bat tay NTRIP...");
+    const uint32_t settleStart = millis();
+    const uint32_t settleDurationMs = 600;
+
+    while (millis() - settleStart < settleDurationMs) {
+        modem.maintain();
+        delay(20);
+    }
+
+    Serial.println("[SETUP][NTRIP] Modem da on dinh, bat dau ket noi NTRIP.");
+}
+
 void initPrefs() {
     prefs.clear();
     prefs.putBool("NEED_RESET", false);
-    prefs.putInt("RSTRT_COUNT", 0);
-    prefs.putUChar("TX_TO_MODEM_RX", 17);
-    prefs.putUChar("RX_TO_MODEM_TX", 16);
-    prefs.putUChar("MODEM_DC_PIN", 15);
-    prefs.putUChar("MODEM_DTR_PIN", 4);
-
+    prefs.putInt("RSTRT_COUNT", 0); // chưa cấu hình được, lấy được
     prefs.putString("CONNECTION_TYPE", "4G");
-    prefs.putString("APN", APN);
-    prefs.putString("WIFI_SSID", WIFI_SSID);
-    prefs.putString("WIFI_PASS", WIFI_PASSWORD);
-    prefs.putString("GPRS_USER", "");
-    prefs.putString("GPRS_PASS", "");
-    prefs.putInt("GNSS_RX", RX_GNSS);
-    prefs.putInt("GNSS_TX", TX_GNSS);
+    // Hai giá trị hợp lệ: "4G" và "WIFI". Giá trị này được nạp khi khởi động.
+    prefs.putString("GNSS_MDL_TYPE", "UBLOX");
 
-    prefs.putString("NTRIP_SERVER", NTRIP_CASTER_IP);
-    prefs.putUShort("NTRIP_PORT", NTRIP_CASTER_PORT);
-    prefs.putString("NTRIP_MPT", NTRIP_MOUNTPOINT);
-    prefs.putString("NT_AUTH_BS", NTRIP_AUTH_BASE_STATION);
+    prefs.putString("APN", APN); // cấu hình đc, chưa lấy đc
+    prefs.putString("WIFI_SSID", WIFI_SSID); // cấu hình đc, lấy đc
+    prefs.putString("WIFI_PASS", WIFI_PASSWORD); // cấu hình đc, lấy đc
+    prefs.putString("GPRS_USER", ""); // cấu hình đc, chưa lấy đc
+    prefs.putString("GPRS_PASS", ""); // cấu hình đc, chưa lấy đc
+    prefs.putString("NTRIP_SERVER", NTRIP_CASTER_ADDRESS); // cấu hình được, lấy được
+    prefs.putUShort("NTRIP_PORT", NTRIP_CASTER_PORT); // cấu hình được, lấy được
+    prefs.putString("NTRIP_MPT", NTRIP_MOUNTPOINT); // cấu hình được, lấy được
+    prefs.putString("NT_AUTH_BS", NTRIP_AUTH_BASE_STATION); // cấu hình được, lấy được
 
-    prefs.putString("MQTT_SERVER", MQTT_SERVER);
-    prefs.putUShort("MQTT_PORT", MQTT_PORT);
-    prefs.putString("MQTT_USER", MQTT_USER);
-    prefs.putString("MQTT_PASS", MQTT_PASS);
-    prefs.putString("TPC_SUB_CMD", TOPIC_SUB_CMD);
-    prefs.putString("TPC_HEALTH", TOPIC_PUB_HEALTH);
+    prefs.putString("MQTT_SERVER", MQTT_SERVER); // cấu hình được, lấy được
+    prefs.putUShort("MQTT_PORT", MQTT_PORT); // cấu hình được, lấy được
+    prefs.putString("MQTT_USER", MQTT_USER); // cấu hình đc, lấy được
+    prefs.putString("MQTT_PASS", MQTT_PASS); // cấu hình đc, lấy được
+
+    prefs.putString("TPC_SUB_CMD", TOPIC_SUB_CMD); // cấu hình được, lấy được
+    prefs.putString("TPC_HEALTH", TOPIC_PUB_HEALTH); // cấu hình đc, lấy được
 }
 
 static void serviceMqtt(const bool reconnect) {

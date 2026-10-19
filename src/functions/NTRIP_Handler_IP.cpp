@@ -1,7 +1,3 @@
-#include "Top_Lvl_Config.h"
-#include "hardware/Wifi_handler.h"
-
-#if RTCM_COMMUNICATION_PROTOCOL == TCP_IP || defined(UNIT_TEST)
 #define NTRIP_HANDLER_IP_CODE
 
 #include "functions/NTRIP_Handler_IP.h"
@@ -506,27 +502,3 @@ void stopNtripRover() {
 bool ntripRoverActive() {
     return roverSessionActive && roverSessionAuthenticated;
 }
-
-#else
-
-// Keep the backend status/control interface linkable for builds that select a
-// non-TCP GNSS transport. The current CORS agent uses TCP NTRIP only.
-int setupNTRIP() { return 0; }
-int bootstrapUM980() { return 0; }
-int loopNTRIP(String &) { return 504; }
-int connectNTRIP() { return -1; }
-bool isNtripConnected() { return false; }
-void stopNtrip() {}
-bool ntripServerConnected(uint8_t) { return false; }
-uint32_t ntripServerBps(uint8_t) { return 0; }
-bool startNtripRover(const String &, uint16_t, const String &, const String &,
-                    String, uint8_t) { return false; }
-int loopNtripRover() { return 504; }
-void stopNtripRover() {}
-bool ntripRoverActive() { return false; }
-namespace {
-    WiFiClient inactiveNtripClient;
-}
-Client &activeNtripClient() { return inactiveNtripClient; }
-
-#endif // NTRIP_HANDLER_IP_CODE

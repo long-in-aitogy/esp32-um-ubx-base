@@ -19,10 +19,6 @@ void tearDown(void)
 void setup() {
     prefs.begin("myPrefs");
     prefs.putBool("NOT_FIRST_BOOT", true);
-    prefs.putUChar("TX_TO_MODEM_RX", 17);
-    prefs.putUChar("RX_TO_MODEM_TX", 16);
-    prefs.putUChar("MODEM_DC_PIN", 15);
-    prefs.putUChar("MODEM_DTR_PIN", 4);
     prefs.putString("APN", "v-internet");
     prefs.putString("GPRS_USER", "");
     prefs.putString("GPRS_PASS", "");

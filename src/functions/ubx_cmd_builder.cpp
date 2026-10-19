@@ -16,6 +16,8 @@ namespace UbxCmdBuilder
         uint32_t uart1;
         uint32_t uart2;
         uint32_t usb;
+        uint32_t i2c = 0;
+        uint32_t spi = 0;
     };
     struct MessageKeys
     {
@@ -52,20 +54,31 @@ namespace UbxCmdBuilder
 
     constexpr std::array<MessageKeys, 9> RTCM_KEYS = {
         {
-            {"1005", {0x209102BE, 0x209102BF, 0x209102C0}},
-            {"1074", {0x2091035F, 0x20910360, 0x20910361}},
-            {"1084", {0x20910364, 0x20910365, 0x20910366}},
-            {"1094", {0x20910368, 0x20910369, 0x2091036A}},
-            {"1124", {0x2091036E, 0x2091036F, 0x20910370}},
-            {"1077", {0x209102CD, 0x209102CE, 0x209102CF}},
-            {"1087", {0x209102D2, 0x209102D3, 0x209102D4}},
-            {"1097", {0x209102D7, 0x209102D8, 0x209102D9}},
-            {"1230", {0x20910304, 0x20910305, 0x20910306}},
+            {"1005", {0x209102BE, 0x209102BF, 0x209102C0, 0x209102BD, 0x209102C1}},
+            {"1074", {0x2091035F, 0x20910360, 0x20910361, 0x2091035E, 0x20910362}},
+            {"1084", {0x20910364, 0x20910365, 0x20910366, 0x20910363, 0x20910367}},
+            {"1094", {0x20910368, 0x20910369, 0x2091036A, 0x2091036B, 0x2091036C}},
+            {"1124", {0x2091036E, 0x2091036F, 0x20910370, 0x2091036D, 0x20910371}},
+            {"1077", {0x209102CD, 0x209102CE, 0x209102CF, 0x209102CC, 0x209102D0}},
+            {"1087", {0x209102D2, 0x209102D3, 0x209102D4, 0x209102D1, 0x209102D5}},
+            {"1097", {0x209102D7, 0x209102D8, 0x209102D9, 0x209102D6, 0x209102DA}},
+            {"1230", {0x20910304, 0x20910305, 0x20910306, 0x20910303, 0x20910307}},
         }
     };
 
-    inline bool isValidPort(const String &port) {
+    inline bool isValidRtcmPort(const String &port)
+    {
+        return port == "I2C" || port == "UART1" || port == "UART2" ||
+               port == "USB" || port == "SPI";
+    }
+
+    inline bool isValidPort(const String &port) { 
         return port == "UART1" || port == "UART2" || port == "USB";
+    }
+
+    inline bool isValidUnicorePort(const String &port)
+    {
+        return port == "COM1" || port == "COM2" || port == "COM3";
     }
 
     uint32_t keyForPort(const PortKeys &keys, const String &port)
@@ -76,6 +89,10 @@ namespace UbxCmdBuilder
             return keys.uart2;
         else if (port == "USB")
             return keys.usb;
+        else if (port == "I2C")
+            return keys.i2c;
+        else if (port == "SPI")
+            return keys.spi;
         return 0;
     }
 
@@ -174,7 +191,7 @@ namespace UbxCmdBuilder
             return msm7 && o.gal;
         return !strcmp(message, "1230") && o.glo;
     }
-
+    
     void appendUnicoreOutputCommands(CommandList &commands, const String &port, const GnssOptions &options)
     {
         const GnssOptions o = normalizeGnssOptions(options);
@@ -345,11 +362,20 @@ namespace UbxCmdBuilder
         return command;
     }
 
-    CommandList buildBaseSurveyInCommand(uint32_t duration, float accuracy, const GnssOptions &options, int moduleType)
+    GnssSensorType sensorTypeFromString(const String &sensorType)
+    {
+        String normalized = sensorType;
+        normalized.trim();
+        normalized.toUpperCase();
+        return normalized == "UNICORE" ? GnssSensorType::Unicore : GnssSensorType::Ublox;
+    }
+
+    CommandList buildBaseSurveyInCommand(uint32_t duration, float accuracy,
+                                         GnssSensorType sensorType, const GnssOptions &options)
     {
         CommandList commands;
-
-        if (moduleType == GNSS_MODULE_TYPE_UBLOX) {
+        if (sensorType == GnssSensorType::Ublox)
+        {
             Command message = buildTmode3Message();
             message[8] = 1;
             writeU32(message, 30, duration);
@@ -358,7 +384,9 @@ namespace UbxCmdBuilder
             commands.push_back(message);
             commands.push_back(buildUbloxOutputConfigCommand(options));
             commands.emplace_back(std::begin(UBLOX_SAVE_CONFIG), std::end(UBLOX_SAVE_CONFIG));
-        } else if (moduleType == GNSS_MODULE_TYPE_UNICORE) {
+        }
+        else
+        {
             commands.push_back(asciiCommand("unlogall\r\n"));
             commands.push_back(delayCommand(1000));
             const String cmd = "mode base time " + String(duration) + "\r\n";
@@ -372,11 +400,12 @@ namespace UbxCmdBuilder
         return commands;
     }
 
-    CommandList buildBaseFixedLlaCommand(double lat, double lon, double alt, float accuracy, const GnssOptions &options, int moduleType)
+    CommandList buildBaseFixedLlaCommand(double lat, double lon, double alt, float accuracy,
+                                         GnssSensorType sensorType, const GnssOptions &options)
     {
         CommandList commands;
-
-        if (moduleType == GNSS_MODULE_TYPE_UBLOX) {
+        if (sensorType == GnssSensorType::Ublox)
+        {
             Command message = buildTmode3Message();
             message[8] = 2;
             message[9] = 1;
@@ -394,7 +423,9 @@ namespace UbxCmdBuilder
             commands.push_back(message);
             commands.push_back(buildUbloxOutputConfigCommand(options));
             commands.emplace_back(std::begin(UBLOX_SAVE_CONFIG), std::end(UBLOX_SAVE_CONFIG));
-        } else if (moduleType == GNSS_MODULE_TYPE_UNICORE) {
+        }
+        else
+        {
             commands.push_back(asciiCommand("unlogall\r\n"));
             commands.push_back(delayCommand(1000));
             const String cmd = "mode base " + String(lat, 10) + " " + String(lon, 10) + " " + String(alt, 4) + "\r\n";
@@ -403,6 +434,47 @@ namespace UbxCmdBuilder
             commands.push_back(delayCommand(2000));
             Serial.printf("Configuring Unicore output messages on COM%d\n", GNSS_UNICORE_PORT);
             appendUnicoreOutputCommands(commands, "com" + String(GNSS_UNICORE_PORT), options);
+            commands.push_back(asciiCommand("saveconfig\r\n"));
+        }
+        return commands;
+    }
+
+    CommandList buildBaseRtcmOutputCommand(const String &message, const String &port, bool enabled,
+                                           GnssSensorType sensorType)
+    {
+        String normalizedMessage = message;
+        String normalizedPort = port;
+        normalizedMessage.trim();
+        normalizedMessage.toUpperCase();
+        normalizedPort.trim();
+        normalizedPort.toUpperCase();
+
+        CommandList commands;
+        if (sensorType == GnssSensorType::Ublox)
+        {
+            if (!isValidRtcmPort(normalizedPort))
+                return commands;
+
+            for (const auto &rtcm : RTCM_KEYS)
+            {
+                if (normalizedMessage == rtcm.name)
+                {
+                    commands.push_back(ubxCfgValsetU1({
+                        {keyForPort(rtcm.keys, normalizedPort), enabled}
+                    }));
+                    commands.emplace_back(std::begin(UBLOX_SAVE_CONFIG), std::end(UBLOX_SAVE_CONFIG));
+                    return commands;
+                }
+            }
+        }
+        else if (isValidUnicorePort(normalizedPort) && normalizedMessage.length() == 4)
+        {
+            for (uint8_t i = 0; i < normalizedMessage.length(); ++i)
+                if (!isDigit(normalizedMessage[i]))
+                    return commands;
+
+            commands.push_back(asciiCommand("rtcm" + normalizedMessage + " " + normalizedPort +
+                                            " " + String(enabled ? 1 : 0) + "\r\n"));
             commands.push_back(asciiCommand("saveconfig\r\n"));
         }
         return commands;
