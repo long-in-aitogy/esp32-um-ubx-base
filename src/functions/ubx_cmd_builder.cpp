@@ -45,11 +45,11 @@ namespace UbxCmdBuilder
             {"PUBX04", {0x209100F7, 0x209100F8, 0x209100F9}},
         }
     };
-    
+
     constexpr std::array<PortKeys, 2> NAV_KEYS = {
         {
             {0x20910007, 0x20910008, 0x20910009}, {0x20910034, 0x20910035, 0x20910036}
-        }    
+        }
     };
 
     constexpr std::array<MessageKeys, 9> RTCM_KEYS = {
@@ -133,7 +133,7 @@ namespace UbxCmdBuilder
         result.push_back(ckB);
         return result;
     }
-    
+
     Command ubxCfgValsetU1(const std::vector<std::pair<uint32_t, bool>> &entries)
     {
         Command payload = {0x00, 0x07, 0x00, 0x00};
@@ -163,7 +163,7 @@ namespace UbxCmdBuilder
         }
         return ubxPacket(0x06, 0x01, payload);
     }
-    
+
     inline bool isDiagnosticNmea(const char *name)
     {
         return !strcmp(name, "GGA") || !strcmp(name, "GSA") || !strcmp(name, "GSV") || !strcmp(name, "GST");
@@ -240,7 +240,7 @@ namespace UbxCmdBuilder
         if (o.outputMode != OutputMode::RtcmOnly)
             for (const auto &group : nmea)
                 appendNmeaGroup(group);
-                    
+
         std::vector<String> rtcm = {"1006", "1033"};
         auto add = [&](bool enabled, const std::array<const char *, 3> &messages)
         {
@@ -393,8 +393,8 @@ namespace UbxCmdBuilder
             Serial.printf("Survey-In command: %s", cmd.c_str());
             commands.push_back(asciiCommand(cmd));
             commands.push_back(delayCommand(2000));
-            Serial.println("Configuring Unicore output messages on COM3");
-            appendUnicoreOutputCommands(commands, "com3", options);
+            Serial.printf("Configuring Unicore output messages on COM%d\n", GNSS_UNICORE_PORT);
+            appendUnicoreOutputCommands(commands, "com" + String(GNSS_UNICORE_PORT), options);
             commands.push_back(asciiCommand("saveconfig\r\n"));
         }
         return commands;
@@ -432,8 +432,8 @@ namespace UbxCmdBuilder
             Serial.printf("Fixed position command: %s", cmd.c_str());
             commands.push_back(asciiCommand(cmd));
             commands.push_back(delayCommand(2000));
-            Serial.println("Configuring Unicore output messages on COM3");
-            appendUnicoreOutputCommands(commands, "com3", options);
+            Serial.printf("Configuring Unicore output messages on COM%d\n", GNSS_UNICORE_PORT);
+            appendUnicoreOutputCommands(commands, "com" + String(GNSS_UNICORE_PORT), options);
             commands.push_back(asciiCommand("saveconfig\r\n"));
         }
         return commands;
@@ -478,6 +478,68 @@ namespace UbxCmdBuilder
             commands.push_back(asciiCommand("saveconfig\r\n"));
         }
         return commands;
+    }
+
+    CommandList buildRoverCommand(int moduleType)
+    {
+        if (moduleType == GNSS_MODULE_TYPE_UNICORE) {
+            const String port = "com" + String(GNSS_UNICORE_PORT);
+            return {asciiCommand("mode rover\r\n"),
+                    asciiCommand("gpgga " + port + " 1\r\n"),
+                    asciiCommand("gpgst " + port + " 1\r\n"),
+                    asciiCommand("saveconfig\r\n")};
+        }
+        if (moduleType != GNSS_MODULE_TYPE_UBLOX) return {};
+        // Same UART1 protocol gates and TMODE disable as the Python agent.
+        Command input = ubxCfgValsetU1({{0x10730001, true}, {0x10730004, true},
+                                      {0x10740001, true}, {0x10740002, true},
+                                      {0x20110001, false}});
+        Command mode = buildTmode3Message();
+        finishTmode3Checksum(mode);
+        GnssOptions options;
+        options.ports = {"UART1"};
+        return {input, mode,
+                ubxCfgMsg(0xF0, 0x00, options.ports, 1),
+                ubxCfgMsg(0xF0, 0x07, options.ports, 1),
+                ubxCfgMsg(0xF5, 0x05, {}, 0),
+                Command(std::begin(UBLOX_SAVE_CONFIG), std::end(UBLOX_SAVE_CONFIG))};
+    }
+
+    void routeUbloxOutput(uint8_t *data, size_t length)
+    {
+        size_t offset = 0;
+        while (offset + 8 <= length && data[offset] == 0xB5 && data[offset + 1] == 0x62) {
+            uint8_t *packet = data + offset;
+            const size_t payloadLength = packet[4] | (static_cast<size_t>(packet[5]) << 8);
+            if (payloadLength + 8 > length - offset) return;
+            if (packet[2] == 0x06 && packet[3] == 0x8A && payloadLength >= 4) {
+                // CORS output VALSET consists exclusively of U1 keys.
+                const auto remap = [](uint32_t key, const PortKeys &ports) {
+                    return key == ports.usb || key == ports.uart2 ? ports.uart1 : key;
+                };
+                if ((payloadLength - 4) % 5 != 0) return;
+                for (size_t i = 10; i + 5 <= payloadLength + 6; i += 5) {
+                    uint32_t key = 0;
+                    for (uint8_t b = 0; b < 4; ++b) key |= static_cast<uint32_t>(packet[i + b]) << (8 * b);
+                    for (const auto &message : NMEA_KEYS) key = remap(key, message.keys);
+                    for (const auto &ports : NAV_KEYS) key = remap(key, ports);
+                    for (const auto &message : RTCM_KEYS) key = remap(key, message.keys);
+                    for (uint8_t protocol : {1, 2, 4}) {
+                        key = remap(key, {0x10740000U | protocol, 0x10760000U | protocol, 0x10780000U | protocol});
+                    }
+                    for (uint8_t b = 0; b < 4; ++b) packet[i + b] = static_cast<uint8_t>(key >> (8 * b));
+                }
+            } else if (packet[2] == 0x06 && packet[3] == 0x01 && payloadLength == 8) {
+                // CFG-MSG UART1 rate inherits any requested USB/UART2 rate.
+                packet[9] = std::max(packet[9], std::max(packet[10], packet[11]));
+                packet[10] = packet[11] = 0;
+            }
+            uint8_t a = 0, b = 0;
+            for (size_t i = 2; i < payloadLength + 6; ++i) { a += packet[i]; b += a; }
+            packet[payloadLength + 6] = a;
+            packet[payloadLength + 7] = b;
+            offset += payloadLength + 8;
+        }
     }
 
     CommandList buildGeotekLteUnicoreConfig(const String &setupMethod, uint32_t duration, double lat, double lon, double alt)

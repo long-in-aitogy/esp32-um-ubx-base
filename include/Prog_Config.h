@@ -51,10 +51,19 @@ inline constexpr char NTRIP_AUTH_BASE_STATION[] = "12345";
 
 // ================ CẤU HÌNH MQTT =================
 
-inline constexpr char MQTT_SERVER[] = "aitogy.asia";
+inline constexpr char MQTT_SERVER[] = "45.117.179.134";
 inline constexpr uint16_t MQTT_PORT = 1883;
 inline constexpr char MQTT_USER[] = "mqttUser";
 inline constexpr char MQTT_PASS[] = "MqttPassword123$%^";
+
+// Version/topic defaults used by cors/geodetic/agent_universal.py and the
+// cors_dashboard backend.  Values can still be overridden from Preferences.
+inline constexpr char AGENT_VERSION[] = "V2.3.1";
+inline constexpr char BACKEND_HOST[] = "cors.aitogy.com";
+inline constexpr uint16_t BACKEND_WEBSOCKET_PORT = 8000;
+inline constexpr uint32_t BACKEND_STATUS_INTERVAL_MS = 5000;
+inline constexpr uint32_t BACKEND_CONTROL_STALE_MS = 45000;
+inline constexpr uint32_t BACKEND_CONTROL_RECOVERY_MS = 5000;
 
 inline constexpr char TOPIC_SUB_CMD[] = "tdm2402/um980_base_001/cmd";
 inline constexpr char TOPIC_PUB_HEALTH[] = "tdm2402/um980_base_001/health";

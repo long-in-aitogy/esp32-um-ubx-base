@@ -2,6 +2,7 @@
 #define COMMAND_BUILDER_H
 
 #include <Arduino.h>
+#include "Top_Lvl_Config.h"
 #include <cstdint>
 #include <vector>
 
