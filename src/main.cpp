@@ -15,6 +15,15 @@ namespace {
     constexpr uint8_t CONNECTION_FAIL_LIMIT = 5;
     constexpr uint32_t GNSS_DATA_TIMEOUT_MS = 5000;
 
+    // The MQTT task also drives BackendAgent's WebSocket parser and command
+    // dispatcher.  Four KiB is insufficient once it enters the networking and
+    // JSON library call chains, and an overflow corrupts the FreeRTOS task
+    // frame before the panic handler can print a useful application backtrace.
+    constexpr uint32_t SERIAL_COMMAND_TASK_STACK_BYTES = 4096;
+    constexpr uint32_t MQTT_TASK_STACK_BYTES = 12288;
+    constexpr uint32_t NTRIP_TASK_STACK_BYTES = 6144;
+    constexpr uint32_t HEALTH_TASK_STACK_BYTES = 4096;
+
     struct RtcmState {
         uint32_t lastGnssReceptionMs = 0;
         bool hasGnssReception = false;
@@ -44,14 +53,6 @@ __attribute__((noreturn)) void taskSerialCommand([[maybe_unused]] void *paramete
 void setup() {
     static RtcmState rtcmState;
     Serial.begin(115200);
-#if BOARD_HELTEC
-    // ESP32-S3 uses native USB CDC. Give the monitor a short opportunity to
-    // connect so the startup banner is not lost immediately after reset.
-    const uint32_t usbCdcWaitStarted = millis();
-    while (!Serial && millis() - usbCdcWaitStarted < 3000) {
-        delay(10);
-    }
-#endif
 
     Serial.println("[DEBUG] Serial initialized");
     Serial.println("\n=========================================");
@@ -101,7 +102,8 @@ void setup() {
     // Khởi động mạng
     // Keep the local console responsive even if Wi-Fi/GSM cannot connect.
     Serial.println("[SETUP] Starting Serial Command task before network setup.");
-    xTaskCreatePinnedToCore(taskSerialCommand, "Serial CMD Task", 3072, nullptr, 1, nullptr, 1);
+    xTaskCreatePinnedToCore(taskSerialCommand, "Serial CMD Task", SERIAL_COMMAND_TASK_STACK_BYTES,
+                            nullptr, 1, nullptr, 1);
 
 #ifndef NATIVE_BUILD
     if (isGsmConnection()) {
@@ -154,15 +156,16 @@ void setup() {
     Serial.println("[SETUP] Tao mutex tcpStreamMutex thanh cong!");
 
     Serial.println("[SETUP] Task MQTT: Quan ly ket noi MQTT va callback.");
-    xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", 4096, nullptr, 3, nullptr, 1);
+    xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", MQTT_TASK_STACK_BYTES, nullptr, 3, nullptr, 1);
     Serial.println("[SETUP] Da khoi dong Task MQTT!");
 
     Serial.println("[SETUP] Task NTRIP: Gui du lieu RTCM qua NTRIP.");
-    xTaskCreatePinnedToCore(taskNtrip, "NTRIP Task", 4096, &rtcmState, 2, nullptr, 1);
+    xTaskCreatePinnedToCore(taskNtrip, "NTRIP Task", NTRIP_TASK_STACK_BYTES, &rtcmState, 2, nullptr, 1);
     Serial.println("[SETUP] Da khoi dong Task NTRIP!");
 
     Serial.println("[SETUP] Task Health: Gui thong tin suc khoe thiet bi len MQTT moi 30s");
-    xTaskCreatePinnedToCore(healthCheckTask, "Health Task", 4096, &rtcmState, 1, nullptr, 1);
+    xTaskCreatePinnedToCore(healthCheckTask, "Health Task", HEALTH_TASK_STACK_BYTES,
+                            &rtcmState, 1, nullptr, 1);
     Serial.println("[SETUP] Da khoi dong Task Health!");
 
     Serial.println("=========================================");

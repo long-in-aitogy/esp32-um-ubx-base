@@ -8,11 +8,7 @@
 extern Preferences prefs;
 
 // ================= CẤU HÌNH CHÂN CẮM VÀ TỐC ĐỘ SERIAL =================
-#if BOARD_HELTEC
-inline constexpr int RX_GNSS = 41; // Nối TXD (Hàng dưới) của UM980
-inline constexpr int TX_GNSS = 42; // Nối RXD (Hàng dưới) của UM980
-inline constexpr int LED_PIN = 35;
-#elif BOARD_2A53N
+#if BOARD_2A53N
 inline constexpr int RX_GNSS = 22; // Nối TXD (Hàng dưới) của UM980
 inline constexpr int TX_GNSS = 23; // Nối RXD (Hàng dưới) của UM980
 inline constexpr int LED_PIN = 2;
