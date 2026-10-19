@@ -21,6 +21,7 @@ public:
     bool detectGnssChip(Stream &gnssStream, bool force = false);
     void setDetectedChipIfUnknown(const String &chipType);
     const String &sensorType() const { return sensorType_; }
+    uint32_t detectedBaud() const { return detectedBaud_; }
 
     void onMqttConnected();
     void onMqttDisconnected();
@@ -63,6 +64,7 @@ private:
     String serviceConfig_ = "{}";
     String licenseToken_;
     String sensorType_ = "UNKNOWN";
+    uint32_t detectedBaud_ = 115200;
 
     bool provisioned_ = false;
     StationLock stationLock_;

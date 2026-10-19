@@ -920,6 +920,7 @@ void BackendAgent::loadPreferences() {
 
     deviceName_ = statePrefs.getString("DEVICE_NAME", "ESP32-GNSS");
     sensorType_ = statePrefs.getString("SENSOR_TYPE", "UNKNOWN");
+    detectedBaud_ = statePrefs.getUInt("DETECT_BAUD", GNSS_BAUD);
     provisioned_ = statePrefs.getBool("PROVISIONED", false);
     stationLock_.restore(statePrefs.getBool("REMOTE_LOCK", false),
                          statePrefs.getUChar("LOCK_SERVERS", 0));
@@ -1012,6 +1013,7 @@ bool BackendAgent::saveStatePreferences() {
     check("DEVICE_SERIAL", nvs_set_str(handle, "DEVICE_SERIAL", serialNumber_.c_str()));
     check("DEVICE_NAME", nvs_set_str(handle, "DEVICE_NAME", deviceName_.c_str()));
     check("SENSOR_TYPE", nvs_set_str(handle, "SENSOR_TYPE", sensorType_.c_str()));
+    check("DETECT_BAUD", nvs_set_u32(handle, "DETECT_BAUD", detectedBaud_));
     check("PROVISIONED", nvs_set_u8(handle, "PROVISIONED", provisioned_));
     check("REMOTE_LOCK", nvs_set_u8(handle, "REMOTE_LOCK", stationLock_.all));
     check("LOCK_SERVERS", nvs_set_u8(handle, "LOCK_SERVERS", stationLock_.servers));
@@ -1074,10 +1076,27 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
         { 23, 22, "Board 2A53N dao chieu (RX=23, TX=22)" }
     };
 
-    static constexpr uint32_t BAUD_RATES[] = {115200, 38400, 9600, 460800};
+    static constexpr uint32_t BAUD_RATES[] = {115200, 460800, 230400, 921600, 38400, 9600};
     bool anyByteSeen = false;
     int workingRx = RX_GNSS;
     int workingTx = TX_GNSS;
+
+    const char *unicoreKeywords[] = {
+        "Unicore", "UM982", "UM980", "UM9", "UB4", "FIRMWARE", "COMPTYPE", "MODEL", "#VERSION"
+    };
+
+    auto checkUnicoreKeywords = [&](const String &text) -> bool {
+        for (const char *kw : unicoreKeywords) {
+            if (text.indexOf(kw) >= 0) return true;
+        }
+        return false;
+    };
+
+    const char *unicoreProbes[] = {
+        "version\r\n",
+        "config version\r\n",
+        "config\r\n"
+    };
 
     for (const auto &cand : candidates) {
         Serial.printf("[GNSS-SCAN] Dang thu cap chan: %s ...\n", cand.desc);
@@ -1094,87 +1113,45 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
                 stream.read();
             }
 
-            // Thu doc thu dong xem co luong NMEA / RTCM san co khong
-            uint32_t passiveStart = millis();
-            String passiveChunk = "";
-            while (millis() - passiveStart < 300) {
-                while (stream.available()) {
-                    anyByteSeen = true;
-                    uint8_t b = static_cast<uint8_t>(stream.read());
-                    if (b >= 32 && b <= 126) passiveChunk += static_cast<char>(b);
-                    if (passiveChunk.length() >= 256) break;
-                }
-                if (passiveChunk.length() >= 10) break;
-                delay(10);
-            }
+            // Giai doan 1: Gui lenh chu dong cho Unicore (giong agent_universal.py)
+            for (const char *cmd : unicoreProbes) {
+                while (stream.available()) stream.read();
+                stream.print(cmd);
 
-            if (!passiveChunk.isEmpty()) {
-                Serial.printf("[GNSS] => Phat hien byte tai %s @ %u baud: %s\n",
-                              cand.desc, baud, passiveChunk.substring(0, min((size_t)60, (size_t)passiveChunk.length())).c_str());
-                if (passiveChunk.indexOf("$PUBX") >= 0) {
-                    sensorType_ = "Ublox";
-                    workingRx = cand.rx; workingTx = cand.tx;
-                    saveStatePreferences();
-                    Serial.printf("[GNSS] => XAC DINH CHIP: Ublox (qua $PUBX tren RX=%d, TX=%d @ %u)\n", cand.rx, cand.tx, baud);
-                    markStatusDirty();
-                    return true;
+                String response = "";
+                uint32_t startMs = millis();
+                while (millis() - startMs < 350) {
+                    while (stream.available()) {
+                        anyByteSeen = true;
+                        char c = static_cast<char>(stream.read());
+                        response += c;
+                        if (response.length() >= 512) break;
+                    }
+                    if (checkUnicoreKeywords(response)) break;
+                    delay(10);
                 }
-                if (passiveChunk.indexOf("UM9") >= 0 || passiveChunk.indexOf("Unicore") >= 0 ||
-                    passiveChunk.indexOf("#VERSION") >= 0) {
+
+                if (checkUnicoreKeywords(response)) {
                     sensorType_ = "Unicorecomm";
+                    detectedBaud_ = baud;
                     workingRx = cand.rx; workingTx = cand.tx;
                     saveStatePreferences();
-                    Serial.printf("[GNSS] => XAC DINH CHIP: Unicorecomm (tren RX=%d, TX=%d @ %u)\n", cand.rx, cand.tx, baud);
+                    Serial.printf("[GNSS] => XAC DINH CHIP: Unicorecomm tai %s @ %u baud (Phan hoi lenh %s: %s)\n",
+                                  cand.desc, baud, cmd, response.substring(0, min((size_t)60, (size_t)response.length())).c_str());
                     markStatusDirty();
                     return true;
                 }
             }
 
-            // 1. Gui lenh chu dong Unicorecomm
-            while (stream.available()) stream.read();
-            stream.print("unlog\r\n");
-            delay(30);
-            while (stream.available()) stream.read();
-
-            stream.print("version\r\n");
-            String response = "";
-            uint32_t startMs = millis();
-            while (millis() - startMs < 400) {
-                while (stream.available()) {
-                    anyByteSeen = true;
-                    char c = static_cast<char>(stream.read());
-                    response += c;
-                    if (response.length() >= 512) break;
-                }
-                if (response.indexOf("UM980") >= 0 || response.indexOf("UM982") >= 0 ||
-                    response.indexOf("UM9") >= 0 || response.indexOf("Unicore") >= 0 ||
-                    response.indexOf("UB4") >= 0 || response.indexOf("#VERSION") >= 0) {
-                    break;
-                }
-                delay(10);
-            }
-
-            if (response.indexOf("UM980") >= 0 || response.indexOf("UM982") >= 0 ||
-                response.indexOf("UM9") >= 0 || response.indexOf("Unicore") >= 0 ||
-                response.indexOf("UB4") >= 0 || response.indexOf("#VERSION") >= 0) {
-                sensorType_ = "Unicorecomm";
-                workingRx = cand.rx; workingTx = cand.tx;
-                saveStatePreferences();
-                Serial.printf("[GNSS] => XAC DINH CHIP: Unicorecomm tai %s @ %u baud (Phan hoi: %s)\n",
-                              cand.desc, baud, response.substring(0, min((size_t)60, (size_t)response.length())).c_str());
-                markStatusDirty();
-                return true;
-            }
-
-            // 2. Gui lenh chu dong U-blox (UBX-MON-VER)
+            // Giai doan 2: Gui lenh chu dong U-blox (UBX-MON-VER)
             while (stream.available()) stream.read();
             const uint8_t ubxMonVer[] = {0xB5, 0x62, 0x0A, 0x04, 0x00, 0x00, 0x0E, 0x34};
             stream.write(ubxMonVer, sizeof(ubxMonVer));
 
-            startMs = millis();
+            uint32_t startMs = millis();
             uint8_t ubxMatch = 0;
             bool foundUblox = false;
-            while (millis() - startMs < 400) {
+            while (millis() - startMs < 300) {
                 while (stream.available()) {
                     anyByteSeen = true;
                     uint8_t b = static_cast<uint8_t>(stream.read());
@@ -1194,6 +1171,7 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
 
             if (foundUblox) {
                 sensorType_ = "Ublox";
+                detectedBaud_ = baud;
                 workingRx = cand.rx; workingTx = cand.tx;
                 saveStatePreferences();
                 Serial.printf("[GNSS] => XAC DINH CHIP: Ublox (ZED-F9P) tai %s @ %u baud\n", cand.desc, baud);
@@ -1201,14 +1179,62 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
                 return true;
             }
 
-            // 3. Fallback NMEA
-            if (passiveChunk.indexOf("$G") >= 0) {
-                sensorType_ = "Ublox";
+            // Giai doan 3: Doc thu dong (kiem tra RTCM3 0xD3 hoac chuoi NMEA)
+            uint32_t passiveStart = millis();
+            String passiveChunk = "";
+            bool sawRtcm3 = false;
+            while (millis() - passiveStart < 300) {
+                while (stream.available()) {
+                    anyByteSeen = true;
+                    uint8_t b = static_cast<uint8_t>(stream.read());
+                    if (b == 0xD3) sawRtcm3 = true;
+                    if (b >= 32 && b <= 126) passiveChunk += static_cast<char>(b);
+                    if (passiveChunk.length() >= 256) break;
+                }
+                if (sawRtcm3 || passiveChunk.length() >= 20) break;
+                delay(10);
+            }
+
+            if (sawRtcm3) {
+                sensorType_ = "Unicorecomm";
+                detectedBaud_ = baud;
                 workingRx = cand.rx; workingTx = cand.tx;
                 saveStatePreferences();
-                Serial.printf("[GNSS] => Phat hien luong NMEA ($G...) tai %s @ %u baud -> Chon Ublox\n", cand.desc, baud);
+                Serial.printf("[GNSS] => XAC DINH CHIP: Nguon RTCM3 tai %s @ %u baud (byte 0xD3)\n", cand.desc, baud);
                 markStatusDirty();
                 return true;
+            }
+
+            if (!passiveChunk.isEmpty()) {
+                Serial.printf("[GNSS] => Phat hien byte tai %s @ %u baud: %s\n",
+                              cand.desc, baud, passiveChunk.substring(0, min((size_t)60, (size_t)passiveChunk.length())).c_str());
+                if (passiveChunk.indexOf("$PUBX") >= 0) {
+                    sensorType_ = "Ublox";
+                    detectedBaud_ = baud;
+                    workingRx = cand.rx; workingTx = cand.tx;
+                    saveStatePreferences();
+                    Serial.printf("[GNSS] => XAC DINH CHIP: Ublox (qua $PUBX tren RX=%d, TX=%d @ %u)\n", cand.rx, cand.tx, baud);
+                    markStatusDirty();
+                    return true;
+                }
+                if (checkUnicoreKeywords(passiveChunk)) {
+                    sensorType_ = "Unicorecomm";
+                    detectedBaud_ = baud;
+                    workingRx = cand.rx; workingTx = cand.tx;
+                    saveStatePreferences();
+                    Serial.printf("[GNSS] => XAC DINH CHIP: Unicorecomm (tren RX=%d, TX=%d @ %u)\n", cand.rx, cand.tx, baud);
+                    markStatusDirty();
+                    return true;
+                }
+                if (passiveChunk.indexOf("$G") >= 0) {
+                    sensorType_ = "Ublox";
+                    detectedBaud_ = baud;
+                    workingRx = cand.rx; workingTx = cand.tx;
+                    saveStatePreferences();
+                    Serial.printf("[GNSS] => Phat hien luong NMEA ($G...) tai %s @ %u baud -> Chon Ublox\n", cand.desc, baud);
+                    markStatusDirty();
+                    return true;
+                }
             }
         }
 
@@ -1221,7 +1247,7 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
     // Reset ve chan va baud mac dinh neu khong tim thay
 #if !defined(NATIVE_BUILD)
     Serial1.end();
-    Serial1.begin(GNSS_BAUD, SERIAL_8N1, static_cast<uint8_t>(workingRx), static_cast<uint8_t>(workingTx));
+    Serial1.begin(detectedBaud_, SERIAL_8N1, static_cast<uint8_t>(workingRx), static_cast<uint8_t>(workingTx));
     Serial1.setTimeout(100);
 #endif
 
@@ -2039,7 +2065,7 @@ String BackendAgent::buildStatusPayload() {
     doc["base_mode_active"] = baseConfig_ != "{}" && baseConfig_.length() > 2;
     doc["detected_chip_type"] = sensorType_;
     doc["detected_chip_port"] = "Serial1";
-    doc["detected_chip_baud"] = GNSS_BAUD;
+    doc["detected_chip_baud"] = detectedBaud_;
     doc["is_provisioned"] = provisioned_;
     doc["is_locked"] = stationLock_.all;
     doc["is_synced"] = true;
