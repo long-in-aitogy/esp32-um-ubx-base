@@ -35,3 +35,4 @@ struct HostSerial {
     void println(const char *) {}
 };
 inline HostSerial Serial;
+inline bool isDigit(char c) { return std::isdigit(static_cast<unsigned char>(c)); }

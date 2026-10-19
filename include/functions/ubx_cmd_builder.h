@@ -47,12 +47,30 @@ namespace UbxCmdBuilder
         GnssSensorType sensorTypeFromString(const String &sensorType);
     Command buildUbloxOutputConfigCommand(const GnssOptions &options = {});
     CommandList buildBaseSurveyInCommand(uint32_t duration,
-                                                                                 float accuracy, GnssSensorType sensorType,
-                                                                                 const GnssOptions &options = {});
+                                         float accuracy, GnssSensorType sensorType,
+                                         const GnssOptions &options = {});
+    inline CommandList buildBaseSurveyInCommand(uint32_t duration, float accuracy,
+                                                const GnssOptions &options = {},
+                                                int moduleType = GNSS_MODULE_TYPE)
+    {
+        return buildBaseSurveyInCommand(
+            duration, accuracy,
+            moduleType == GNSS_MODULE_TYPE_UNICORE ? GnssSensorType::Unicore : GnssSensorType::Ublox,
+            options);
+    }
     CommandList buildBaseFixedLlaCommand(double lat, double lon,
                                          double alt, float accuracy,
-                                                                                 GnssSensorType sensorType,
+                                         GnssSensorType sensorType,
                                          const GnssOptions &options = {});
+    inline CommandList buildBaseFixedLlaCommand(double lat, double lon, double alt, float accuracy,
+                                                const GnssOptions &options = {},
+                                                int moduleType = GNSS_MODULE_TYPE)
+    {
+        return buildBaseFixedLlaCommand(
+            lat, lon, alt, accuracy,
+            moduleType == GNSS_MODULE_TYPE_UNICORE ? GnssSensorType::Unicore : GnssSensorType::Ublox,
+            options);
+    }
     CommandList buildBaseRtcmOutputCommand(const String &message,
                                                                                      const String &port, bool enabled,
                                                                                      GnssSensorType sensorType);
