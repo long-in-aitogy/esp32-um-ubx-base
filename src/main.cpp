@@ -69,6 +69,9 @@ void setup() {
         Serial.println("[SETUP] Khoi tao Preferences lan dau tien...");
         initPrefs();
     }
+    prefs.putString("WIFI_SSID", WIFI_SSID);
+    prefs.putString("WIFI_PASS", WIFI_PASSWORD);
+    prefs.putString("CONNECTION_TYPE", "WIFI");
 
     loadConnectionTypeFromPrefs();
     const int gnssTX = TX_GNSS;
@@ -355,7 +358,7 @@ void initPrefs() {
     prefs.clear();
     prefs.putBool("NEED_RESET", false);
     prefs.putInt("RSTRT_COUNT", 0); // chưa cấu hình được, lấy được
-    prefs.putString("CONNECTION_TYPE", "4G");
+    prefs.putString("CONNECTION_TYPE", "WIFI");
     // Hai giá trị hợp lệ: "4G" và "WIFI". Giá trị này được nạp khi khởi động.
     prefs.putString("GNSS_MDL_TYPE", "UBLOX");
 
