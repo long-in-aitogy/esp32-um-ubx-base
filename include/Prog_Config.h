@@ -44,6 +44,7 @@ inline constexpr char GPRS_PASS[] = "";
 // ================= CẤU HÌNH NTRIP =================
 inline constexpr int NTRIP_MODE = 1; // 1: Chỉ gửi GGA khi có yêu cầu; 2: Gửi GGA mỗi khi có thay đổi; 3: Gửi GGA đều đặn mỗi 10s
 inline constexpr char NTRIP_CASTER_ADDRESS[] = "aitogy.com.vn";
+inline constexpr const char* NTRIP_CASTER_IP = NTRIP_CASTER_ADDRESS;
 inline constexpr uint16_t NTRIP_CASTER_PORT = 2101;
 inline constexpr char NTRIP_MOUNTPOINT[] = "/test";
 // inline constexpr char NTRIP_AUTH[] = "YWl0b2d5OmFpdG9neQ==";

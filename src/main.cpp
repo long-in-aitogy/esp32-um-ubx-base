@@ -12,11 +12,24 @@ Preferences prefs;
 extern PubSubClient mqtt;
 
 namespace {
-    class DeviceRuntime {
+    inline constexpr uint8_t CONNECTION_FAIL_LIMIT = 5;
+    inline constexpr uint32_t GNSS_DATA_TIMEOUT_MS = 5000;
+
+    struct RtcmState {
+        String latest;
+        uint32_t lastGnssReceptionMs = 0;
+        bool hasGnssReception = false;
+        RtcmMessageCounts messageCounts;
+    };
+
+    class deviceHealth {
     public:
+        inline static unsigned long lastHealthCheck = 0;
         inline static uint8_t mqttDisconnectCount = 0;
+        inline static uint8_t ntripDisconnectCount = 0;
         inline static uint8_t gsmDisconnectCount = 0;
     };
+    using DeviceRuntime = deviceHealth;
 }
 
 SemaphoreHandle_t rtcmBufferMutex = nullptr;
@@ -31,11 +44,9 @@ __attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void* const para
 __attribute__((noreturn)) void taskMQTT([[maybe_unused]] void* const parameter);
 __attribute__((noreturn)) void taskSerialCommand([[maybe_unused]] void* const parameter);
 
-__attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter);
-__attribute__((noreturn)) void taskMQTT([[maybe_unused]] void *parameter);
-__attribute__((noreturn)) void taskSerialCommand([[maybe_unused]] void *parameter);
-
 void setup() {
+    static RtcmState rtcmState;
+
     // Release Bluetooth DRAM since BLE/BT is not used, returning ~30-40KB to FreeRTOS heap
     esp_bt_controller_mem_release(ESP_BT_MODE_BTDM);
 
@@ -130,25 +141,20 @@ void setup() {
     Serial.println("[SETUP] Tao mutex tcpStreamMutex thanh cong!");
 
     Serial.println("[SETUP] Task MQTT: Quan ly ket noi MQTT va callback.");
-    xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", 4096, nullptr, 3, nullptr, 1);
+    xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", 6144, nullptr, 3, nullptr, 1);
     Serial.println("[SETUP] Da khoi dong Task MQTT!");
 
     Serial.println("[SETUP] Task Serial Command: Lang nghe lenh tu Serial moi 500 ms.");
-    xTaskCreatePinnedToCore(taskSerialCommand, "Serial CMD Task", 3072, nullptr, 1, nullptr, 1);
+    xTaskCreatePinnedToCore(taskSerialCommand, "Serial CMD Task", 2048, nullptr, 1, nullptr, 1);
     Serial.println("[SETUP] Da khoi dong Task Serial Command!");
 
     Serial.println("[SETUP] Task NTRIP: Gui du lieu RTCM qua NTRIP.");
-    xTaskCreatePinnedToCore(taskNtrip, "NTRIP Task", 4096, &rtcmState, 2, nullptr, 1);
+    xTaskCreatePinnedToCore(taskNtrip, "NTRIP Task", 5120, &rtcmState, 2, nullptr, 1);
     Serial.println("[SETUP] Da khoi dong Task NTRIP!");
 
-    setupMQTT();
-#if RTCM_COMMUNICATION_PROTOCOL == TCP_IP
-    setupNTRIP();
-#endif
-
-    xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", 6144, nullptr, 3, nullptr, 1);
-    xTaskCreatePinnedToCore(taskSerialCommand, "Serial CMD Task", 2048, nullptr, 1, nullptr, 1);
-    xTaskCreatePinnedToCore(taskNtrip, "NTRIP Task", 5120, nullptr, 2, nullptr, 1);
+    Serial.println("[SETUP] Task Health: Gui thong tin suc khoe thiet bi len MQTT moi 30s");
+    xTaskCreatePinnedToCore(healthCheckTask, "Health Task", 4096, &rtcmState, 1, nullptr, 1);
+    Serial.println("[SETUP] Da khoi dong Task Health!");
 
     Serial.println("=========================================");
     Serial.println("        KHOI DONG HOAN TAT               ");
@@ -159,17 +165,30 @@ void setup() {
 }
 
 __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter) {
+    auto* const rtcmState = static_cast<RtcmState*>(parameter);
     Serial.println("[NTRIP TASK] Bat dau task NTRIP...");
+    int loopStatus = 0;
+    String rtcmRead = "";
     while (true) {
-        String rtcmRead;
         if (rtcmBufferMutex && xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
             rtcmRead = receiveRtcmFromGnss();
+            if (rtcmState) {
+                rtcmState->latest = rtcmRead;
+                const RtcmMessageCounts receivedCounts = consumeRtcmMessageCounts();
+                for (size_t i = 0; i < RTCM_SUPPORTED_MESSAGE_TYPE_COUNT; ++i) {
+                    rtcmState->messageCounts.values[i] += receivedCounts.values[i];
+                }
+                if (!rtcmRead.isEmpty()) {
+                    rtcmState->lastGnssReceptionMs = millis();
+                    rtcmState->hasGnssReception = true;
+                }
+            }
             xSemaphoreGive(rtcmBufferMutex);
         }
 
         if (isGsmConnection()) {
             bool gprsConnected = false;
-            if (xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
+            if (tcpStreamMutex && xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
                 gprsConnected = modem.isGprsConnected();
                 xSemaphoreGive(tcpStreamMutex);
             }
@@ -184,7 +203,7 @@ __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter) {
             }
             deviceHealth::gsmDisconnectCount = 0;
         }
-        if (xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
+        if (tcpStreamMutex && xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
             if (loopStatus == 504) {
                 Serial.println("[NTRIP TASK] Dang thu ket noi lai NTRIP...");
                 connectNTRIP();
@@ -209,27 +228,29 @@ __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter) {
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
+
 __attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void* const parameter) {
     auto* const rtcmState = static_cast<RtcmState*>(parameter);
-    // Có tranh chấp tài nguyên với task RTCM và NTRIP publish
     String healthPayload = "";
     uint32_t loopStartTime = 0;
     uint32_t remainingWait = 0;
     while (true) {
         loopStartTime = millis();
         int32_t signalQualityDbm = -1;
-        if (xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)))
+        if (rtcmBufferMutex && xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)))
         {
             if (isGsmConnection()) {
-                if (xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
+                if (tcpStreamMutex && xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
                     signalQualityDbm = modem.getSignalQuality();
                     xSemaphoreGive(tcpStreamMutex);
                 }
             }
-            const bool gnssDataOk = rtcmState->hasGnssReception
-                && millis() - rtcmState->lastGnssReceptionMs <= GNSS_DATA_TIMEOUT_MS;
-            const RtcmMessageCounts messageCounts = rtcmState->messageCounts;
-            rtcmState->messageCounts = {};
+            const bool gnssDataOk = rtcmState && rtcmState->hasGnssReception
+                && (millis() - rtcmState->lastGnssReceptionMs <= GNSS_DATA_TIMEOUT_MS);
+            const RtcmMessageCounts messageCounts = rtcmState ? rtcmState->messageCounts : RtcmMessageCounts{};
+            if (rtcmState) {
+                rtcmState->messageCounts = {};
+            }
             healthPayload = formDeviceHealthString(signalQualityDbm, gnssDataOk,
                                                    messageCounts.values);
             xSemaphoreGive(rtcmBufferMutex);
@@ -243,13 +264,24 @@ __attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void* const para
             if (HEALTH_INTERVAL > (millis() - loopStartTime)) {
                 remainingWait = HEALTH_INTERVAL - (millis() - loopStartTime);
             } else {
-                DeviceRuntime::gsmDisconnectCount = 0;
-                loopNTRIP(rtcmRead);
+                remainingWait = 0;
             }
-            xSemaphoreGive(tcpStreamMutex);
+            vTaskDelay(pdMS_TO_TICKS(remainingWait));
+            continue;
         }
-#endif
-        vTaskDelay(pdMS_TO_TICKS(100));
+
+        #if PROGRAM_DEBUG
+        Serial.println("[HEALTH CHECK] Kiem tra ket noi MQTT de gui thong tin suc khoe...");
+        #endif
+
+        publishHealth(healthPayload);
+        vTaskDelay(1);
+        if (HEALTH_INTERVAL > (millis() - loopStartTime)) {
+            remainingWait = HEALTH_INTERVAL - (millis() - loopStartTime);
+        } else {
+            remainingWait = 0;
+        }
+        vTaskDelay(pdMS_TO_TICKS(remainingWait));
     }
 }
 

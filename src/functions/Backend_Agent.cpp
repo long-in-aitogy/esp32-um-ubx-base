@@ -1310,8 +1310,9 @@ bool BackendAgent::applyBaseCoordinates(const double latitude, const double long
     UbxCmdBuilder::GnssOptions options;
     options.ports = {"UART1"};
     return writeGnssCommands(UbxCmdBuilder::buildBaseFixedLlaCommand(
-        latitude, longitude, altitude, 0.01f, options,
-        sensorType_ == "Ublox" ? GNSS_MODULE_TYPE_UBLOX : GNSS_MODULE_TYPE_UNICORE));
+        latitude, longitude, altitude, 0.01f,
+        sensorType_ == "Ublox" ? UbxCmdBuilder::GnssSensorType::Ublox : UbxCmdBuilder::GnssSensorType::Unicore,
+        options));
 }
 
 void BackendAgent::runWorkflow() {

@@ -9,6 +9,7 @@
 
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <WiFiClient.h>
 
 extern Preferences prefs;
 extern TinyGsm modem;
