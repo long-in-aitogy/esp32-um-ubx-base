@@ -324,6 +324,35 @@ int bootstrapUM980() {
   return 0;
 }
 
+int bootstrapUblox() {
+  UbxCmdBuilder::GnssOptions options;
+  options.ports = {"UART1"};
+  options.outputMode = UbxCmdBuilder::OutputMode::DiagnosticsRtcm;
+  options.msmLevel = UbxCmdBuilder::MsmLevel::Both;
+
+  const UbxCmdBuilder::Command outputConfig =
+      UbxCmdBuilder::buildUbloxOutputConfigCommand(options);
+  if (outputConfig.empty()) {
+    Serial.println("[UBLOX][ERROR] Khong tao duoc lenh cau hinh output.");
+    return -1;
+  }
+
+  Serial1.write(outputConfig.data(), outputConfig.size());
+  Serial1.flush();
+  delay(100);
+
+  const UbxCmdBuilder::Command saveConfig = {
+      0xB5, 0x62, 0x06, 0x09, 0x0D, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x03, 0x1D, 0xAB};
+  Serial1.write(saveConfig.data(), saveConfig.size());
+  Serial1.flush();
+
+  Serial.println("[UBLOX] Da cau hinh output RTCM/NMEA tren UART1.");
+  return 0;
+}
+
 UbxCmdBuilder::GnssSensorType detectGnssSensorType() {
   clearGnssInput();
   Serial1.write(ubxMonVerPoll, sizeof(ubxMonVerPoll));

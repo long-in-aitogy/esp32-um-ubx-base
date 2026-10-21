@@ -107,11 +107,14 @@ void setup()
             Serial.println("[SETUP] Cau hinh UM980 lan dau tien...");
             bootstrapUM980();
         }
+        else if (detectedSensorType == UbxCmdBuilder::GnssSensorType::Ublox) {
+            Serial.println("[SETUP] Cau hinh u-blox lan dau tien...");
+            bootstrapUblox();
+        }
         else {
-            Serial.println("[SETUP][ERROR] Chip GNSS khong hop le, bo qua cau hinh GNSS.");
-        } 
-        Serial.println("[SETUP] Da cau hinh lai tat ca ve mac dinh, khoi dong lai de ap dung cau hinh.");
-        ESP.restart(); // Khởi động lại để áp dụng cấu hình mới
+            Serial.println("[SETUP] Da cau hinh lai tat ca ve mac dinh, khoi dong de ap dung cau hinh.");
+            ESP.restart(); // Khởi động lại để áp dụng cấu hình mới
+        }
     } else {
         Serial.println("[SETUP] Da nhan dien chip GNSS: " + String(detectedSensorTypeName));
     }

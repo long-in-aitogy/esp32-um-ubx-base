@@ -15,6 +15,7 @@ extern SemaphoreHandle_t tcpStreamMutex;
 
 int setupNTRIP();
 int bootstrapUM980();
+int bootstrapUblox();
 UbxCmdBuilder::GnssSensorType detectGnssSensorType();
 int loopNTRIP(String& rtcmData);
 int connectNTRIP();
