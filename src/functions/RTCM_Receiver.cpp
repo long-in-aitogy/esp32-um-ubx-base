@@ -2,6 +2,7 @@
 
 #include "HardwareSerial.h"
 #include "Prog_Config.h"
+#include "functions/Backend_Agent.h"
 
 namespace {
 
@@ -294,14 +295,14 @@ String receiveRtcmFromGnss() {
         const size_t bytesToRead = min(bytesAvailable, sizeof(buffer));
         if (bytesToRead == 0) break;
 
-        rtcmData.concat(reinterpret_cast<char*>(buf), bytesRead);
+        const size_t bytesRead = Serial1.readBytes(
+            reinterpret_cast<char *>(buffer), bytesToRead);
+        if (bytesRead == 0) break;
+        for (size_t i = 0; i < bytesRead; ++i) {
+            consumeByte(buffer[i], rtcmData);
+        }
     }
     xSemaphoreGive(gnssSerialMutex);
-    #endif
-
-    if (!rtcmData.isEmpty()) {
-        analyzeRtcmFrames(rtcmData);
-    }
 
     if (!rtcmData.isEmpty()) {
         constexpr uint16_t supportedRtcmTypes[] = {

@@ -130,7 +130,7 @@ namespace {
            response.indexOf("UM982") >= 0 ||
            response.indexOf("UM98") >= 0;
   }
-}
+} // namespace
 
 bool jsonBool(JsonObjectConst object, const String &key, bool fallback = false) {
     const JsonVariantConst value = object[key.c_str()];
@@ -168,6 +168,49 @@ String base64Encode(const String &plain) {
         encoded += i + 2 < plain.length() ? alphabet[value & 0x3F] : '=';
     }
     return encoded;
+}
+
+namespace {
+constexpr size_t CONFIG_DOCUMENT_SIZE = 4096;
+constexpr uint8_t NTRIP_SERVER_COUNT = 2;
+constexpr uint32_t RECONNECT_INTERVAL_MS = 5000;
+constexpr uint32_t BPS_WINDOW_MS = 1000;
+
+struct NtripEndpoint {
+    bool enabled = false;
+    bool authenticated = false;
+    String host;
+    uint16_t port = 2101;
+    String mountpoint;
+    String username;
+    String password;
+    uint8_t version = 1;
+    uint32_t lastReconnectMs = 0;
+    uint32_t bytesInWindow = 0;
+    uint32_t bytesPerSecond = 0;
+    uint32_t windowStartedMs = 0;
+    uint32_t lastKeepAliveMs = 0;
+};
+
+NtripEndpoint endpoints[NTRIP_SERVER_COUNT];
+WiFiClient wifiNtripClient1;
+WiFiClient wifiNtripClient2;
+TinyGsmClient gsmNtripClient1(modem, 0);
+TinyGsmClient gsmNtripClient2(modem, 2);
+bool roverSessionActive = false;
+bool roverSessionAuthenticated = false;
+uint32_t roverLastGgaMs = 0;
+
+Client &clientFor(uint8_t index) {
+    if (index == 0) {
+        return isWifiConnection()
+            ? static_cast<Client &>(wifiNtripClient1)
+            : static_cast<Client &>(gsmNtripClient1);
+    }
+    return isWifiConnection()
+        ? static_cast<Client &>(wifiNtripClient2)
+        : static_cast<Client &>(gsmNtripClient2);
+  }
 }
 
 void clearEndpointState(NtripEndpoint &endpoint) {
@@ -366,8 +409,6 @@ void updateBps(NtripEndpoint &endpoint) {
         endpoint.windowStartedMs = now;
     }
 }
-
-} // namespace
 
 Client &activeNtripClient() {
     return clientFor(0);
