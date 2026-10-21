@@ -104,6 +104,11 @@ cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
         : "UBLOX";
     const UbxCmdBuilder::GnssSensorType sensorType =
         UbxCmdBuilder::sensorTypeFromString(configuredSensorType);
+    if (sensorType == UbxCmdBuilder::GnssSensorType::Invalid) {
+        prefs.end();
+        Serial.println("[MQTT COMMAND DOWNLINK] LOI - Chip GNSS dang o trang thai INVALID.");
+        return CMD_ACTION_NONE;
+    }
     prefs.end();
 
     if (cmdWords.empty()) {

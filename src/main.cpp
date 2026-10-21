@@ -1,6 +1,7 @@
 #include "helper.h"
 #include "functions/RTCM_Receiver.h"
 #include "functions/cmd_handler.h"
+#include "functions/NTRIP_Handler_IP.h"
 
 // ================= ĐỊNH NGHĨA CÁC BIẾN TOÀN CỤC =================
 Preferences prefs;
@@ -90,13 +91,29 @@ void setup()
     Serial1.begin(GNSS_BAUD, SERIAL_8N1, (uint8_t)gnssRX, (uint8_t)gnssTX);
     Serial1.setTimeout(100);
 
+    const UbxCmdBuilder::GnssSensorType detectedSensorType = detectGnssSensorType();
+    const char *detectedSensorTypeName = "INVALID";
+    if (detectedSensorType == UbxCmdBuilder::GnssSensorType::Ublox) {
+        detectedSensorTypeName = "UBLOX";
+    } else if (detectedSensorType == UbxCmdBuilder::GnssSensorType::Unicore) {
+        detectedSensorTypeName = "UNICORE";
+    }
+    prefs.begin("myPrefs", false);
+    prefs.putString("GNSS_MDL_TYPE", detectedSensorTypeName);
+    prefs.end();
+
     if (needReset) {
-        Serial.println("[SETUP] Cau hinh UM980 lan dau tien...");
-        bootstrapUM980();
+        if (detectedSensorType == UbxCmdBuilder::GnssSensorType::Unicore) {
+            Serial.println("[SETUP] Cau hinh UM980 lan dau tien...");
+            bootstrapUM980();
+        }
+        else {
+            Serial.println("[SETUP][ERROR] Chip GNSS khong hop le, bo qua cau hinh GNSS.");
+        } 
         Serial.println("[SETUP] Da cau hinh lai tat ca ve mac dinh, khoi dong lai de ap dung cau hinh.");
         ESP.restart(); // Khởi động lại để áp dụng cấu hình mới
     } else {
-        Serial.println("[SETUP] Da cau hinh GNSS chip, khong can cau hinh lai.");
+        Serial.println("[SETUP] Da nhan dien chip GNSS: " + String(detectedSensorTypeName));
     }
 
     // Khởi động mạng
@@ -375,7 +392,7 @@ void initPrefs() {
     prefs.putInt("RSTRT_COUNT", 0); // chưa cấu hình được, lấy được
     prefs.putString("CONNECTION_TYPE", "4G");
     // Hai giá trị hợp lệ: "4G" và "WIFI". Giá trị này được nạp khi khởi động.
-    prefs.putString("GNSS_MDL_TYPE", "UBLOX");
+    prefs.putString("GNSS_MDL_TYPE", "INVALID");
 
     prefs.putString("APN", APN); // cấu hình đc, chưa lấy đc
     prefs.putString("WIFI_SSID", WIFI_SSID); // cấu hình đc, lấy đc

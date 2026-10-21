@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include "Top_Lvl_Config.h"
 #include "hardware/Connection_type.h"
+#include "functions/ubx_cmd_builder.h"
 
 extern SemaphoreHandle_t rtcmBufferMutex;
 extern SemaphoreHandle_t tcpStreamMutex;
@@ -14,6 +15,7 @@ extern SemaphoreHandle_t tcpStreamMutex;
 
 int setupNTRIP();
 int bootstrapUM980();
+UbxCmdBuilder::GnssSensorType detectGnssSensorType();
 int loopNTRIP(String& rtcmData);
 int connectNTRIP();
 // Thêm hàm lấy trạng thái NTRIP

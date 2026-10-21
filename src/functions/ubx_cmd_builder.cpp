@@ -367,7 +367,13 @@ namespace UbxCmdBuilder
         String normalized = sensorType;
         normalized.trim();
         normalized.toUpperCase();
-        return normalized == "UNICORE" ? GnssSensorType::Unicore : GnssSensorType::Ublox;
+        if (normalized == "INVALID")
+            return GnssSensorType::Invalid;
+        if (normalized == "UBLOX")
+            return GnssSensorType::Ublox;
+        if (normalized == "UNICORE")
+            return GnssSensorType::Unicore;
+        return GnssSensorType::Invalid;
     }
 
     CommandList buildBaseSurveyInCommand(uint32_t duration, float accuracy,
@@ -385,7 +391,7 @@ namespace UbxCmdBuilder
             commands.push_back(buildUbloxOutputConfigCommand(options));
             commands.emplace_back(std::begin(UBLOX_SAVE_CONFIG), std::end(UBLOX_SAVE_CONFIG));
         }
-        else
+        else if (sensorType == GnssSensorType::Unicore)
         {
             commands.push_back(asciiCommand("unlogall\r\n"));
             commands.push_back(delayCommand(1000));
@@ -424,7 +430,7 @@ namespace UbxCmdBuilder
             commands.push_back(buildUbloxOutputConfigCommand(options));
             commands.emplace_back(std::begin(UBLOX_SAVE_CONFIG), std::end(UBLOX_SAVE_CONFIG));
         }
-        else
+        else if (sensorType == GnssSensorType::Unicore)
         {
             commands.push_back(asciiCommand("unlogall\r\n"));
             commands.push_back(delayCommand(1000));
@@ -467,7 +473,7 @@ namespace UbxCmdBuilder
                 }
             }
         }
-        else if (isValidUnicorePort(normalizedPort) && normalizedMessage.length() == 4)
+        else if (sensorType == GnssSensorType::Unicore) if (isValidUnicorePort(normalizedPort) && normalizedMessage.length() == 4)
         {
             for (uint8_t i = 0; i < normalizedMessage.length(); ++i)
                 if (!isDigit(normalizedMessage[i]))
