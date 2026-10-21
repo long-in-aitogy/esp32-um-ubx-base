@@ -3,6 +3,7 @@
 #include "functions/NTRIP_Handler_IP.h"
 #include "Prog_Config.h"
 #include <Preferences.h>
+#include <cstring>
 
 // ================= BIẾN TOÀN CỤC =================
 extern Preferences prefs;
@@ -28,6 +29,100 @@ namespace {
   inline constexpr const char rtcm1127SetOutputCom2[] = "RTCM1127 COM2 1\r\n";
   inline constexpr const char rtcmSetBaudCom2[] = "CONFIG COM2 115200\r\n";
   inline constexpr const char cmdSaveConfig[] = "saveconfig\r\n";
+  inline constexpr uint8_t ubxMonVerPoll[] = {
+    0xB5, 0x62, 0x0A, 0x04, 0x00, 0x00, 0x0E, 0x30
+  };
+
+  void clearGnssInput()
+  {
+    while (Serial1.available() > 0) {
+      Serial1.read();
+    }
+  }
+
+  bool hasValidUbxFrame(const uint8_t *data, size_t length)
+  {
+    for (size_t start = 0; start + 8 <= length; ++start) {
+      if (data[start] != 0xB5 || data[start + 1] != 0x62 ||
+          data[start + 2] != 0x0A || data[start + 3] != 0x04) {
+        continue;
+      }
+
+      const size_t payloadLength =
+          static_cast<size_t>(data[start + 4]) |
+          (static_cast<size_t>(data[start + 5]) << 8);
+      const size_t frameLength = payloadLength + 8;
+      if (start + frameLength > length) {
+        return false;
+      }
+
+      uint8_t checksumA = 0;
+      uint8_t checksumB = 0;
+      for (size_t i = start + 2; i < start + 6 + payloadLength; ++i) {
+        checksumA = static_cast<uint8_t>(checksumA + data[i]);
+        checksumB = static_cast<uint8_t>(checksumB + checksumA);
+      }
+
+      if (checksumA == data[start + frameLength - 2] &&
+          checksumB == data[start + frameLength - 1]) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool receiveUbxFrame(uint32_t timeoutMs)
+  {
+    uint8_t buffer[512] = {};
+    size_t length = 0;
+    const uint32_t start = millis();
+
+    while (millis() - start < timeoutMs) {
+      while (Serial1.available() > 0) {
+        const int value = Serial1.read();
+        if (length < sizeof(buffer)) {
+          buffer[length++] = static_cast<uint8_t>(value);
+        } else {
+          memmove(buffer, buffer + 1, sizeof(buffer) - 1);
+          buffer[sizeof(buffer) - 1] = static_cast<uint8_t>(value);
+        }
+
+        if (hasValidUbxFrame(buffer, length)) {
+          return true;
+        }
+      }
+      delay(2);
+    }
+    return false;
+  }
+
+  bool receiveUnicoreIdentification(uint32_t timeoutMs)
+  {
+    String response;
+    response.reserve(512);
+    const uint32_t start = millis();
+    while (millis() - start < timeoutMs) {
+      while (Serial1.available() > 0) {
+        response += static_cast<char>(Serial1.read());
+      }
+      delay(2);
+    }
+
+    response.toUpperCase();
+    if (!response.isEmpty()) {
+      Serial.println("[GNSS][UNICORE RESPONSE] " + response);
+    } else {
+      Serial.println("[GNSS][UNICORE RESPONSE] <EMPTY>");
+    }
+
+    return response.indexOf("$COMMAND,VERSION") >= 0 ||
+           response.indexOf("#VERSION") >= 0 ||
+           response.indexOf("VERSION") >= 0 ||
+           response.indexOf("UNICORE") >= 0 ||
+           response.indexOf("UM980") >= 0 ||
+           response.indexOf("UM982") >= 0 ||
+           response.indexOf("UM98") >= 0;
+  }
 }
 
 // ================= CÁC ĐỐI TƯỢNG KẾT NỐI =================
@@ -55,6 +150,7 @@ int bootstrapUM980() {
   while (!Serial1.available() && millis() - WaitStartTime < 2000) {
     delay(10);
   }
+
   Serial1.write(nmeaCmdUnlog, strlen(nmeaCmdUnlog)); // Gửi lệnh UNLOG
 
   #ifdef PROGRAM_DEBUG
@@ -237,6 +333,57 @@ int bootstrapUM980() {
   #endif
   delay(20);
   return 0;
+}
+
+int bootstrapUblox() {
+  UbxCmdBuilder::GnssOptions options;
+  options.ports = {"UART1"};
+  options.outputMode = UbxCmdBuilder::OutputMode::DiagnosticsRtcm;
+  options.msmLevel = UbxCmdBuilder::MsmLevel::Both;
+
+  const UbxCmdBuilder::Command outputConfig =
+      UbxCmdBuilder::buildUbloxOutputConfigCommand(options);
+  if (outputConfig.empty()) {
+    Serial.println("[UBLOX][ERROR] Khong tao duoc lenh cau hinh output.");
+    return -1;
+  }
+
+  Serial1.write(outputConfig.data(), outputConfig.size());
+  Serial1.flush();
+  delay(100);
+
+  const UbxCmdBuilder::Command saveConfig = {
+      0xB5, 0x62, 0x06, 0x09, 0x0D, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x03, 0x1D, 0xAB};
+  Serial1.write(saveConfig.data(), saveConfig.size());
+  Serial1.flush();
+
+  Serial.println("[UBLOX] Da cau hinh output RTCM/NMEA tren UART1.");
+  return 0;
+}
+
+UbxCmdBuilder::GnssSensorType detectGnssSensorType() {
+  clearGnssInput();
+  Serial1.write(ubxMonVerPoll, sizeof(ubxMonVerPoll));
+  Serial1.flush();
+  if (receiveUbxFrame(1000)) {
+    Serial.println("[GNSS] Da nhan dien u-blox qua UBX-MON-VER.");
+    return UbxCmdBuilder::GnssSensorType::Ublox;
+  }
+
+  clearGnssInput();
+  Serial1.print("VERSION\r\n");
+  Serial1.flush();
+  delay(50);
+  if (receiveUnicoreIdentification(2500)) {
+    Serial.println("[GNSS] Da nhan dien Unicore qua lenh VERSION.");
+    return UbxCmdBuilder::GnssSensorType::Unicore;
+  }
+
+  Serial.println("[GNSS][ERROR] Khong the nhan dien chip GNSS.");
+  return UbxCmdBuilder::GnssSensorType::Invalid;
 }
 
 int setupNTRIP() {

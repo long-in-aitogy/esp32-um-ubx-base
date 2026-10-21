@@ -1,5 +1,6 @@
 #include "functions/RTCM_Receiver.h"
 #include "HardwareSerial.h"
+#include "Prog_Config.h"
 
 namespace {
     constexpr uint32_t CRC24Q_POLYNOMIAL = 0x1864CFB;
@@ -78,6 +79,11 @@ String receiveRtcmFromGnss() {
     String rtcmData;
     uint8_t buf[128];
 
+    if (gnssSerialMutex == nullptr ||
+        !xSemaphoreTake(gnssSerialMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
+        return rtcmData;
+    }
+
     while (Serial1.available() > 0) {
         const size_t bytesAvailable = static_cast<size_t>(Serial1.available());
         const size_t bytesToRead = min(bytesAvailable, sizeof(buf));
@@ -93,6 +99,7 @@ String receiveRtcmFromGnss() {
 
         rtcmData.concat(reinterpret_cast<char*>(buf), bytesRead);
     }
+    xSemaphoreGive(gnssSerialMutex);
     #endif
 
     if (!rtcmData.isEmpty()) {
