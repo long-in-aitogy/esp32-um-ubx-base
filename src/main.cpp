@@ -2,6 +2,7 @@
 #include "functions/Backend_Agent.h"
 #include "functions/RTCM_Receiver.h"
 #include "functions/cmd_handler.h"
+#include "functions/NTRIP_Handler_IP.h"
 
 #include <time.h>
 #include "esp_bt.h"
@@ -40,6 +41,7 @@ namespace {
 
 SemaphoreHandle_t rtcmBufferMutex = nullptr;
 SemaphoreHandle_t tcpStreamMutex = nullptr;
+SemaphoreHandle_t gnssSerialMutex = nullptr;
 
 void initPrefs();
 static void serviceMqtt(const bool reconnect);
@@ -84,19 +86,35 @@ void setup() {
     Serial1.begin(GNSS_BAUD, SERIAL_8N1, static_cast<uint8_t>(gnssRX), static_cast<uint8_t>(gnssTX));
     Serial1.setTimeout(100);
 
-    // Load the serial, token, service configuration and persistent agent state
-    // before either transport starts publishing status.
-    backendAgent.begin();
+    const UbxCmdBuilder::GnssSensorType detectedSensorType = detectGnssSensorType();
+    const char *detectedSensorTypeName = "INVALID";
+    if (detectedSensorType == UbxCmdBuilder::GnssSensorType::Ublox) {
+        detectedSensorTypeName = "UBLOX";
+    } else if (detectedSensorType == UbxCmdBuilder::GnssSensorType::Unicore) {
+        detectedSensorTypeName = "UNICORE";
+    }
+    prefs.begin("myPrefs", false);
+    prefs.putString("GNSS_MDL_TYPE", detectedSensorTypeName);
+    prefs.end();
 
-    // Auto-detect GNSS receiver chip on Serial1 if not yet known (matches agent_universal.py)
-    backendAgent.detectGnssChip(Serial1);
     if (needReset) {
-        Serial.println("[SETUP] Cau hinh UM980 lan dau tien...");
-        bootstrapUM980();
-        Serial.println("[SETUP] Da cau hinh lai tat ca ve mac dinh, khoi dong lai de ap dung cau hinh.");
-        ESP.restart(); // Khởi động lại để áp dụng cấu hình mới
+        if (detectedSensorType == UbxCmdBuilder::GnssSensorType::Unicore) {
+            Serial.println("[SETUP] Cau hinh UM980 lan dau tien...");
+            bootstrapUM980();
+        }
+        else if (detectedSensorType == UbxCmdBuilder::GnssSensorType::Ublox) {
+            Serial.println("[SETUP] Cau hinh u-blox lan dau tien...");
+            bootstrapUblox();
+        }
+        else {
+            Serial.println("[SETUP][ERROR] Chip GNSS khong hop le, bo qua cau hinh.");
+        }
+        if (detectedSensorType != UbxCmdBuilder::GnssSensorType::Invalid) {
+            Serial.println("[SETUP] Da cau hinh lai tat ca ve mac dinh, khoi dong de ap dung cau hinh.");
+            ESP.restart(); // Khởi động lại để áp dụng cấu hình mới
+        }
     } else {
-        Serial.println("[SETUP] Da cau hinh GNSS chip, khong can cau hinh lai.");
+        Serial.println("[SETUP] Da nhan dien chip GNSS: " + String(detectedSensorTypeName));
     }
 
     // Khởi động mạng
@@ -154,6 +172,13 @@ void setup() {
         tcpStreamMutex = xSemaphoreCreateMutex();
     }
     Serial.println("[SETUP] Tao mutex tcpStreamMutex thanh cong!");
+
+    gnssSerialMutex = xSemaphoreCreateMutex();
+    while (gnssSerialMutex == nullptr) {
+        Serial.println("[ERROR] Tao mutex gnssSerialMutex that bai! Dang thu lai...");
+        gnssSerialMutex = xSemaphoreCreateMutex();
+    }
+    Serial.println("[SETUP] Tao mutex gnssSerialMutex thanh cong!");
 
     Serial.println("[SETUP] Task MQTT: Quan ly ket noi MQTT va callback.");
     xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", MQTT_TASK_STACK_BYTES, nullptr, 3, nullptr, 1);
@@ -335,7 +360,7 @@ void initPrefs() {
     prefs.putInt("RSTRT_COUNT", 0); // chưa cấu hình được, lấy được
     prefs.putString("CONNECTION_TYPE", "4G");
     // Hai giá trị hợp lệ: "4G" và "WIFI". Giá trị này được nạp khi khởi động.
-    prefs.putString("GNSS_MDL_TYPE", "UBLOX");
+    prefs.putString("GNSS_MDL_TYPE", "INVALID");
 
     prefs.putString("APN", APN); // cấu hình đc, chưa lấy đc
     prefs.putString("WIFI_SSID", WIFI_SSID); // cấu hình đc, lấy đc
