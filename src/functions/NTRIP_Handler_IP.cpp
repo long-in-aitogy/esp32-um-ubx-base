@@ -99,6 +99,7 @@ namespace {
   bool receiveUnicoreIdentification(uint32_t timeoutMs)
   {
     String response;
+    response.reserve(512);
     const uint32_t start = millis();
     while (millis() - start < timeoutMs) {
       while (Serial1.available() > 0) {
@@ -108,9 +109,19 @@ namespace {
     }
 
     response.toUpperCase();
-    return response.indexOf("UNICORE") >= 0 ||
+    if (!response.isEmpty()) {
+      Serial.println("[GNSS][UNICORE RESPONSE] " + response);
+    } else {
+      Serial.println("[GNSS][UNICORE RESPONSE] <EMPTY>");
+    }
+
+    return response.indexOf("$COMMAND,VERSION") >= 0 ||
+           response.indexOf("#VERSION") >= 0 ||
+           response.indexOf("VERSION") >= 0 ||
+           response.indexOf("UNICORE") >= 0 ||
            response.indexOf("UM980") >= 0 ||
-           response.indexOf("UM982") >= 0;
+           response.indexOf("UM982") >= 0 ||
+           response.indexOf("UM98") >= 0;
   }
 }
 
@@ -365,7 +376,8 @@ UbxCmdBuilder::GnssSensorType detectGnssSensorType() {
   clearGnssInput();
   Serial1.print("VERSION\r\n");
   Serial1.flush();
-  if (receiveUnicoreIdentification(1000)) {
+  delay(50);
+  if (receiveUnicoreIdentification(2500)) {
     Serial.println("[GNSS] Da nhan dien Unicore qua lenh VERSION.");
     return UbxCmdBuilder::GnssSensorType::Unicore;
   }
