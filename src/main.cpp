@@ -100,6 +100,10 @@ void setup()
     }
 
     // Khởi động mạng
+    // Keep the local console responsive even if Wi-Fi/GSM cannot connect.
+    Serial.println("[SETUP] Starting Serial Command task before network setup.");
+    xTaskCreatePinnedToCore(taskSerialCommand, "Serial CMD Task", 3072, nullptr, 1, nullptr, 1);
+
     bool networkConnected = false;
 
     #ifndef NATIVE_BUILD
@@ -156,10 +160,6 @@ void setup()
     Serial.println("[SETUP] Task MQTT: Quan ly ket noi MQTT va callback.");
     xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", 4096, nullptr, 3, nullptr, 1);
     Serial.println("[SETUP] Da khoi dong Task MQTT!");
-
-    Serial.println("[SETUP] Task Serial Command: Lang nghe lenh tu Serial moi 500 ms.");
-    xTaskCreatePinnedToCore(taskSerialCommand, "Serial CMD Task", 3072, nullptr, 1, nullptr, 1);
-    Serial.println("[SETUP] Da khoi dong Task Serial Command!");
 
     Serial.println("[SETUP] Task NTRIP: Gui du lieu RTCM qua NTRIP.");
     xTaskCreatePinnedToCore(taskNtrip, "NTRIP Task", 4096, &rtcmState, 2, nullptr, 1);
