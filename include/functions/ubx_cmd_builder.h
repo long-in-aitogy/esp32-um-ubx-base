@@ -2,6 +2,7 @@
 #define COMMAND_BUILDER_H
 
 #include <Arduino.h>
+#include "Top_Lvl_Config.h"
 #include <cstdint>
 #include <vector>
 
@@ -55,6 +56,8 @@ namespace UbxCmdBuilder
     CommandList buildBaseRtcmOutputCommand(const String &message,
                                                                                      const String &port, bool enabled,
                                                                                      GnssSensorType sensorType);
+    CommandList buildRoverCommand(GnssSensorType sensorType);
+    void routeUbloxOutput(uint8_t *data, size_t length);
     CommandList buildGeotekLteUnicoreConfig(const String &setupMethod, uint32_t duration = 60,
                                             double lat = 0, double lon = 0, double alt = 0);
     Command commandListToBytes(const CommandList &commands);
