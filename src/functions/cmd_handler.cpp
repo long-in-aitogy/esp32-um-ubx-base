@@ -3,6 +3,9 @@
 #include <Preferences.h>
 #include "Prog_Config.h"
 #include "functions/ubx_cmd_builder.h"
+#include <cstring>
+
+extern SemaphoreHandle_t rtcmBufferMutex;
 
 extern Preferences prefs;
 
@@ -170,6 +173,7 @@ std::vector<String> splitCommand(const String &command) {
 
 cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
     UbxCmdBuilder::GnssOptions options;
+    options.ports = {"UART1"};
     UbxCmdBuilder::CommandList commands;
     prefs.begin("myPrefs", true);
     const String configuredSensorType = prefs.isKey("GNSS_MDL_TYPE")
@@ -308,6 +312,17 @@ cmd_action_t handleEspCommand(const std::vector<String> &cmdWords) {
         if (cmdWords[1] == "4G" && cmdWords[2] == "PASS") {
             Serial.println("[MQTT COMMAND DOWNLINK] Lenh yeu cau cau hinh 4G PASS");
             return cmd_helper::saveStringPreference("GPRS_PASS", cmdWords[3]);
+        }
+        if (cmdWords[1] == "BACKEND" && cmdWords[2] == "HOST") {
+            return cmd_helper::saveStringPreference("BACKEND_HOST", cmdWords[3]);
+        }
+        if (cmdWords[1] == "BACKEND" && cmdWords[2] == "PORT") {
+            const long port = cmdWords[3].toInt();
+            if (port >= 1 && port <= 65535) {
+                return cmd_helper::saveUShortPreference("BACKEND_PORT", static_cast<uint16_t>(port));
+            }
+            Serial.println("[BACKEND] Port must be 1..65535.");
+            return CMD_ACTION_NONE;
         }
     }
     
