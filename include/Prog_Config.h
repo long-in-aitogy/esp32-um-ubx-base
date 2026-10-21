@@ -6,6 +6,7 @@
 #include <Preferences.h>
 
 extern Preferences prefs;
+extern SemaphoreHandle_t gnssSerialMutex;
 
 // ================= CẤU HÌNH CHÂN CẮM VÀ TỐC ĐỘ SERIAL =================
 #if BOARD_HELTEC

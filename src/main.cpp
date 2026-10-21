@@ -31,6 +31,7 @@ namespace {
 // Semaphore
 SemaphoreHandle_t rtcmBufferMutex = nullptr;
 SemaphoreHandle_t tcpStreamMutex = nullptr;
+SemaphoreHandle_t gnssSerialMutex = nullptr;
 
 /* ===================== NGUYÊN MẪU HÀM ======================== */
 
@@ -176,6 +177,13 @@ void setup()
         tcpStreamMutex = xSemaphoreCreateMutex();
     }
     Serial.println("[SETUP] Tao mutex tcpStreamMutex thanh cong!");
+
+    gnssSerialMutex = xSemaphoreCreateMutex();
+    while (gnssSerialMutex == nullptr) {
+        Serial.println("[ERROR] Tao mutex gnssSerialMutex that bai! Dang thu lai...");
+        gnssSerialMutex = xSemaphoreCreateMutex();
+    }
+    Serial.println("[SETUP] Tao mutex gnssSerialMutex thanh cong!");
 
     Serial.println("[SETUP] Task MQTT: Quan ly ket noi MQTT va callback.");
     xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", 4096, nullptr, 3, nullptr, 1);
