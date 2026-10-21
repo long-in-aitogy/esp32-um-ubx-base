@@ -1,13 +1,7 @@
 #include "functions/RTCM_Receiver.h"
 
 #include "HardwareSerial.h"
-#include "functions/Backend_Agent.h"
-
-#include <freertos/FreeRTOS.h>
-#include <freertos/portmacro.h>
-#include <cstdlib>
-#include <cstring>
-#include <cmath>
+#include "Prog_Config.h"
 
 namespace {
 
@@ -290,15 +284,23 @@ String receiveRtcmFromGnss() {
     rtcmData.reserve(1024);
     uint8_t buffer[128] = {};
 
+    if (gnssSerialMutex == nullptr ||
+        !xSemaphoreTake(gnssSerialMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
+        return rtcmData;
+    }
+
     while (Serial1.available() > 0) {
         const size_t bytesAvailable = static_cast<size_t>(Serial1.available());
         const size_t bytesToRead = min(bytesAvailable, sizeof(buffer));
         if (bytesToRead == 0) break;
 
-        const size_t bytesRead = Serial1.readBytes(reinterpret_cast<char *>(buffer), bytesToRead);
-        if (bytesRead == 0) break;
-        noteInputBytes(bytesRead);
-        for (size_t i = 0; i < bytesRead; ++i) consumeByte(buffer[i], rtcmData);
+        rtcmData.concat(reinterpret_cast<char*>(buf), bytesRead);
+    }
+    xSemaphoreGive(gnssSerialMutex);
+    #endif
+
+    if (!rtcmData.isEmpty()) {
+        analyzeRtcmFrames(rtcmData);
     }
 
     if (!rtcmData.isEmpty()) {

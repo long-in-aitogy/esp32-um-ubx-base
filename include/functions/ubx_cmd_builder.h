@@ -14,6 +14,7 @@ namespace UbxCmdBuilder
 
     enum class GnssSensorType
     {
+        Invalid,
         Ublox,
         Unicore
     };
