@@ -125,7 +125,7 @@ void parseNmeaSentence(const String &rawSentence) {
         fixQuality = updateFix ? atoi(fields[6]) : 0;
         if (fieldCount > 9 && fields[2][0] && fields[3][0]
             && fields[4][0] && fields[5][0]) {
-            // GGA fields are: talker, UTC, latitude, N/S, longitude, E/W,
+            // GGA fields are: sentence ID, UTC, latitude, N/S, longitude, E/W,
             // fix quality, satellites, HDOP, altitude, ...
             latitude = nmeaCoordinate(fields[2], fields[3]);
             longitude = nmeaCoordinate(fields[4], fields[5]);
@@ -202,9 +202,7 @@ void parseNmeaSentence(const String &rawSentence) {
     }
     portEXIT_CRITICAL(&telemetryMux);
 
-    // Match the Python agent's backend publisher: forward the receiver health
-    // sentences that the backend understands, while keeping unrelated GNSS
-    // chatter off the raw_data topic.
+    // Publish only GGA/GSA/GSV/GST receiver health sentences to the backend.
     const bool backendSentence = strcmp(type, "GGA") == 0
         || strcmp(type, "GSA") == 0
         || strcmp(type, "GSV") == 0
@@ -260,8 +258,7 @@ void consumeByte(uint8_t value, String &rtcmOutput) {
                 if (rtcmExpectedLength > sizeof(rtcmFrame)) resetRtcmParser();
             }
             if (rtcmExpectedLength > 0 && rtcmLength == rtcmExpectedLength) {
-                // Forward the complete frame exactly as received. CRC and
-                // message type decoding are deliberately backend concerns.
+                // Forward the complete RTCM frame without validating its CRC or decoding its type.
                 rtcmOutput.concat(reinterpret_cast<const char *>(rtcmFrame), rtcmLength);
                 backendAgent.enqueueRtcm(rtcmFrame, rtcmLength);
                 noteRtcmBytes(rtcmLength);
@@ -339,7 +336,7 @@ String receiveRtcmFromGnss() {
     }
     xSemaphoreGive(gnssSerialMutex);
 
-    // Message types are decoded by the backend, not by this UART reader.
+    // Count forwarded RTCM bytes for the periodic UART diagnostic log.
     static uint32_t lastLogMs = 0;
     static uint32_t receivedBytes = 0;
     receivedBytes += rtcmData.length();
@@ -358,8 +355,7 @@ String receiveRtcmFromGnss() {
 }
 
 RtcmMessageCounts consumeRtcmMessageCounts() {
-    // Kept as a source-compatible no-op for older callers. The firmware does
-    // not decode RTCM message types anymore.
+    // Return zero per-type counters; this parser does not classify RTCM messages.
     return RtcmMessageCounts{};
 }
 

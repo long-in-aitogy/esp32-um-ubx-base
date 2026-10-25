@@ -1,12 +1,12 @@
-#ifndef COMMAND_BUILDER_H
-#define COMMAND_BUILDER_H
+#ifndef GNSS_COMMAND_BUILDER_H
+#define GNSS_COMMAND_BUILDER_H
 
 #include <Arduino.h>
 #include "Top_Lvl_Config.h"
 #include <cstdint>
 #include <vector>
 
-namespace UbxCmdBuilder
+namespace GnssCmdBuilder
 {
 
     using Command = std::vector<uint8_t>;
@@ -45,18 +45,18 @@ namespace UbxCmdBuilder
     };
 
     GnssOptions normalizeGnssOptions(GnssOptions options = {});
-        GnssSensorType sensorTypeFromString(const String &sensorType);
+    GnssSensorType sensorTypeFromString(const String &sensorType);
     Command buildUbloxOutputConfigCommand(const GnssOptions &options = {});
     CommandList buildBaseSurveyInCommand(uint32_t duration,
-                                                                                 float accuracy, GnssSensorType sensorType,
-                                                                                 const GnssOptions &options = {});
+                                         float accuracy, GnssSensorType sensorType,
+                                         const GnssOptions &options = {});
     CommandList buildBaseFixedLlaCommand(double lat, double lon,
                                          double alt, float accuracy,
-                                                                                 GnssSensorType sensorType,
+                                         GnssSensorType sensorType,
                                          const GnssOptions &options = {});
     CommandList buildBaseRtcmOutputCommand(const String &message,
-                                                                                     const String &port, bool enabled,
-                                                                                     GnssSensorType sensorType);
+                                           const String &port, bool enabled,
+                                           GnssSensorType sensorType);
     CommandList buildRoverCommand(GnssSensorType sensorType);
     void routeUbloxOutput(uint8_t *data, size_t length);
     CommandList buildLteUnicoreConfig(const String &setupMethod, uint32_t duration = 60,
@@ -67,6 +67,6 @@ namespace UbxCmdBuilder
     String debugCommand(const Command &command);
     #endif
 
-} // namespace UbxCmdBuilder
+} // namespace GnssCmdBuilder
 
-#endif // COMMAND_BUILDER_H
+#endif // GNSS_COMMAND_BUILDER_H

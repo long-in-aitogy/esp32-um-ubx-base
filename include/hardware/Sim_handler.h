@@ -10,11 +10,10 @@
 // Set serial for AT commands
 #define SerialAT Serial2
 
-// See all AT commands
+// Define DUMP_AT_COMMANDS to mirror modem traffic on the debug console.
 // #define DUMP_AT_COMMANDS
 #define TINY_GSM_DEBUG SerialMon
 
-// #define MODEM_RESET_PIN 4
 
 #include <TinyGsmClient.h>
 #include "Top_Lvl_Config.h"

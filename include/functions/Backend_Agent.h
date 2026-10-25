@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include "functions/Station_Lock.h"
-#include "functions/ubx_cmd_builder.h"
+#include "functions/gnss_cmd_builder.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
@@ -12,8 +12,8 @@
 
 class BackendAgentWebsocket;
 
-// Backend-side agent compatible with cors/geodetic/agent_universal.py.
-// RTCM is intentionally treated as an opaque byte stream in this firmware.
+// Device agent for backend commands, status, provisioning and base workflows.
+// Receiver coordinates come from NMEA; RTCM payloads are not decoded here.
 class BackendAgent {
 public:
     void begin();
@@ -48,8 +48,7 @@ public:
     String baseConfigJson() const;
     String licenseToken() const;
 
-    // Used by the NTRIP transport to apply the same fail-open policy as the
-    // Python agent without coupling the transport to the command parser.
+    // Resolve per-server stream activation from service settings and fail-open state.
     static bool effectiveStreamActive(const JsonObjectConst &service,
                                       uint8_t serverId,
                                       bool failOpen);
@@ -108,7 +107,8 @@ private:
     void runWorkflow();
     static void workflowTaskThunk(void *parameter);
     void requestWorkflowStop();
-    bool writeGnssCommands(const UbxCmdBuilder::CommandList &commands);
+    bool writeGnssCommands(const GnssCmdBuilder::CommandList &commands);
+    bool writeUnicoreCommand(const uint8_t *data, size_t length, String &error);
     void setWorkflowProgress(const String &phase, uint8_t step, uint8_t total,
                              const String &details = String());
     bool runAutoBaseWorkflow(JsonObject payload);
@@ -148,8 +148,7 @@ private:
 
 extern BackendAgent backendAgent;
 
-// Small free functions keep NTRIP_Handler_IP.cpp independent from the class
-// implementation and avoid circular includes.
+// Expose device permissions and fail-open state to network transports.
 bool backendDeviceLocked(uint8_t serverId = 0);
 bool backendControlPlaneFailOpen();
 bool backendDeviceProvisioned();

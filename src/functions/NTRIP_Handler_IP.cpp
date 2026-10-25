@@ -5,6 +5,7 @@
 #include "Prog_Config.h"
 #include "functions/Backend_Agent.h"
 #include "functions/RTCM_Receiver.h"
+#include "functions/unicore_commands.h"
 #include "hardware/Sim_handler.h"
 #include "hardware/Wifi_handler.h"
 
@@ -20,12 +21,11 @@ namespace {
   public:
     inline static bool isIcyOk = false;
     inline static unsigned long lastReconnect = 0;
-    inline static bool isNmeaSent = false; // Cờ kiểm tra xem đã gửi NMEA xác thực chưa
+    inline static bool isNmeaSent = false;
   };
 
   // ================= HẰNG STRING =================
   inline constexpr const char nmeaCmdUnlog[] = "UNLOG\r\n";
-  // char nmeaCmdSetBase[] = "MODE BASE -1618563.4772 5730003.6935 2278811.0631\r\n";
   inline constexpr const char nmeaCmdSetBase[] = "MODE BASE TIME 120 2.5\r\n";
   inline constexpr const char rtcm1084SetOutputCom2[] = "RTCM1084 COM2 1\r\n";
   inline constexpr const char rtcm1074SetOutputCom2[] = "RTCM1074 COM2 1\r\n";
@@ -427,7 +427,8 @@ Client &activeNtripClient() {
 }
 
 int bootstrapUM980() {
-  // tắt tính năng log trước khi bật lại
+  // Gửi lệnh ASCII cấu hình output và survey-in cho Unicore trên COM2.
+  // Nhánh khởi tạo này chỉ gửi UART và ghi log, chưa kiểm tra ACK của từng lệnh.
   unsigned long WaitStartTime = millis();
   while (!Serial1.available() && millis() - WaitStartTime < 2000) {
     delay(10);
@@ -450,14 +451,14 @@ int bootstrapUM980() {
   while (!Serial1.available() && millis() - WaitStartTime < 2000) {
     delay(10);
   }
-  Serial1.write(rtcmSetBaudCom2, strlen(rtcmSetBaudCom2)); // Gửi lệnh RTCM để thiết lập đầu ra COM2
+  Serial1.write(rtcmSetBaudCom2, strlen(rtcmSetBaudCom2)); // Đặt baud COM2 bằng lệnh ASCII.
 
   // thiết lập chế độ base
   WaitStartTime = millis();
   while (!Serial1.available() && millis() - WaitStartTime < 2000) {
     delay(10);
   }
-  Serial1.write(nmeaCmdSetBase, strlen(nmeaCmdSetBase)); // Gửi lệnh NMEA để thiết lập chế độ base station
+  Serial1.write(nmeaCmdSetBase, strlen(nmeaCmdSetBase)); // Bắt đầu survey-in bằng lệnh ASCII.
 
   #ifdef PROGRAM_DEBUG
   WaitStartTime = millis();
@@ -598,6 +599,16 @@ int bootstrapUM980() {
   #endif
   delay(20);
 
+  // Send ephemeris output commands before saving the receiver configuration.
+  for (const auto &command : UnicoreCommands::buildEphemerisOutputCommands("COM2")) {
+    if (Serial1.write(command.data(), command.size()) != command.size()) {
+      Serial.println("[UNICORE][ERROR] Khong gui duoc lenh bat ephemeris.");
+      return -1;
+    }
+    Serial1.flush();
+    delay(100);
+  }
+
   // lưu cấu hình
   WaitStartTime = millis();
   while (!Serial1.available() && millis() - WaitStartTime < 2000) {
@@ -618,13 +629,13 @@ int bootstrapUM980() {
 }
 
 int bootstrapUblox() {
-  UbxCmdBuilder::GnssOptions options;
+  GnssCmdBuilder::GnssOptions options;
   options.ports = {"UART1"};
-  options.outputMode = UbxCmdBuilder::OutputMode::DiagnosticsRtcm;
-  options.msmLevel = UbxCmdBuilder::MsmLevel::Both;
+  options.outputMode = GnssCmdBuilder::OutputMode::DiagnosticsRtcm;
+  options.msmLevel = GnssCmdBuilder::MsmLevel::Both;
 
-  const UbxCmdBuilder::Command outputConfig =
-      UbxCmdBuilder::buildUbloxOutputConfigCommand(options);
+  const GnssCmdBuilder::Command outputConfig =
+      GnssCmdBuilder::buildUbloxOutputConfigCommand(options);
   if (outputConfig.empty()) {
     Serial.println("[UBLOX][ERROR] Khong tao duoc lenh cau hinh output.");
     return -1;
@@ -634,7 +645,7 @@ int bootstrapUblox() {
   Serial1.flush();
   delay(100);
 
-  const UbxCmdBuilder::Command saveConfig = {
+  const GnssCmdBuilder::Command saveConfig = {
       0xB5, 0x62, 0x06, 0x09, 0x0D, 0x00,
       0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,
       0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -646,7 +657,7 @@ int bootstrapUblox() {
   return 0;
 }
 
-UbxCmdBuilder::GnssSensorType detectGnssSensorType() {
+GnssCmdBuilder::GnssSensorType detectGnssSensorType() {
   const uint32_t baudRates[] = {GNSS_BAUD, 38400, 9600, 19200, 57600, 230400, 460800};
   for (const uint32_t baud : baudRates) {
     Serial1.updateBaudRate(baud);
@@ -657,7 +668,7 @@ UbxCmdBuilder::GnssSensorType detectGnssSensorType() {
     Serial1.flush();
     if (receiveUbxFrame(1000)) {
       Serial.printf("[GNSS] Da nhan dien u-blox qua UBX-MON-VER, baud=%lu.\n", static_cast<unsigned long>(baud));
-      return UbxCmdBuilder::GnssSensorType::Ublox;
+      return GnssCmdBuilder::GnssSensorType::Ublox;
     }
 
     clearGnssInput();
@@ -666,13 +677,13 @@ UbxCmdBuilder::GnssSensorType detectGnssSensorType() {
     delay(50);
     if (receiveUnicoreIdentification(1000)) {
       Serial.printf("[GNSS] Da nhan dien Unicore qua lenh VERSION, baud=%lu.\n", static_cast<unsigned long>(baud));
-      return UbxCmdBuilder::GnssSensorType::Unicore;
+      return GnssCmdBuilder::GnssSensorType::Unicore;
     }
   }
 
   Serial1.updateBaudRate(GNSS_BAUD);
   Serial.println("[GNSS][ERROR] Khong the nhan dien chip GNSS.");
-  return UbxCmdBuilder::GnssSensorType::Invalid;
+  return GnssCmdBuilder::GnssSensorType::Invalid;
 }
 
 int setupNTRIP() {
@@ -775,9 +786,8 @@ bool startNtripRover(const String &host, const uint16_t port, const String &user
     while (mountpoint.startsWith("/")) mountpoint.remove(0, 1);
     if (mountpoint.isEmpty()) return false;
 
-    // Source server 1 uses mux 0. All source sockets are stopped before this
-    // function is called, so reusing that mux avoids requiring a fifth modem
-    // socket while MQTT (1), source 2 (2), and WebSocket (3) stay available.
+    // The temporary rover reuses source server 1's client and modem mux 0.
+    // Close that client before opening a receive-only correction stream.
     roverBytesReceived = 0;
     roverPacketsReceived = 0;
     roverSessionActive = true;

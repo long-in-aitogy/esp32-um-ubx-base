@@ -10,12 +10,12 @@ extern SemaphoreHandle_t gnssSerialMutex;
 
 // ================= CẤU HÌNH CHÂN CẮM VÀ TỐC ĐỘ SERIAL =================
 #if BOARD_2A53N
-inline constexpr int RX_GNSS = 22; // Nối TXD (Hàng dưới) của UM980
-inline constexpr int TX_GNSS = 23; // Nối RXD (Hàng dưới) của UM980
+inline constexpr int RX_GNSS = 22; // ESP32 RX nối TX của receiver GNSS.
+inline constexpr int TX_GNSS = 23; // ESP32 TX nối RX của receiver GNSS.
 inline constexpr int LED_PIN = 2;
 #elif BOARD_TDM_240X
-inline constexpr int RX_GNSS = 18; // Nối TXD (Hàng dưới) của UM980
-inline constexpr int TX_GNSS = 19; // Nối RXD (Hàng dưới) của UM980
+inline constexpr int RX_GNSS = 18; // ESP32 RX nối TX của receiver GNSS.
+inline constexpr int TX_GNSS = 19; // ESP32 TX nối RX của receiver GNSS.
 inline constexpr int LED_PIN = 2;
 #endif
 inline constexpr int GNSS_BAUD = 115200;
@@ -41,11 +41,11 @@ inline constexpr char GPRS_USER[] = "";     // Thường để trống
 inline constexpr char GPRS_PASS[] = "";
 
 // ================= CẤU HÌNH NTRIP =================
-inline constexpr int NTRIP_MODE = 1; // 1: Chỉ gửi GGA khi có yêu cầu; 2: Gửi GGA mỗi khi có thay đổi; 3: Gửi GGA đều đặn mỗi 10s
+// Mã trạng thái nền của luồng gửi NTRIP; cộng 4 khi gửi được RTCM.
+inline constexpr int NTRIP_MODE = 1;
 inline constexpr char NTRIP_CASTER_ADDRESS[] = "aitogy.com.vn";
 inline constexpr uint16_t NTRIP_CASTER_PORT = 2101;
 inline constexpr char NTRIP_MOUNTPOINT[] = "/test";
-// inline constexpr char NTRIP_AUTH[] = "YWl0b2d5OmFpdG9neQ==";
 inline constexpr char NTRIP_AUTH_BASE_STATION[] = "12345";
 
 // ================ CẤU HÌNH MQTT =================
@@ -55,8 +55,8 @@ inline constexpr uint16_t MQTT_PORT = 1883;
 inline constexpr char MQTT_USER[] = "mqttUser";
 inline constexpr char MQTT_PASS[] = "MqttPassword123$%^";
 
-// Version/topic defaults used by cors/geodetic/agent_universal.py and the
-// cors_dashboard backend.  Values can still be overridden from Preferences.
+// Firmware version and backend connection/status defaults.
+// Backend host and port can be overridden in Preferences.
 inline constexpr char AGENT_VERSION[] = "V2.3.5";
 inline constexpr char BACKEND_HOST[] = "base.aitogy.com";
 inline constexpr uint16_t BACKEND_WEBSOCKET_PORT = 8000;

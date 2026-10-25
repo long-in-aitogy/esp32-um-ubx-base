@@ -16,10 +16,8 @@ namespace {
     constexpr uint8_t CONNECTION_FAIL_LIMIT = 5;
     constexpr uint32_t GNSS_DATA_TIMEOUT_MS = 5000;
 
-    // The MQTT task also drives BackendAgent's WebSocket parser and command
-    // dispatcher.  Four KiB is insufficient once it enters the networking and
-    // JSON library call chains, and an overflow corrupts the FreeRTOS task
-    // frame before the panic handler can print a useful application backtrace.
+    // The MQTT task also runs WebSocket and JSON command handling, so it
+    // needs more stack than the serial console or periodic health task.
     constexpr uint32_t SERIAL_COMMAND_TASK_STACK_BYTES = 4096;
     constexpr uint32_t MQTT_TASK_STACK_BYTES = 12288;
     constexpr uint32_t NTRIP_TASK_STACK_BYTES = 6144;
@@ -62,7 +60,7 @@ void setup() {
     Serial.println("=========================================");
     Serial.printf("[FIRMWARE] %s | build %s %s\n", AGENT_VERSION, __DATE__, __TIME__);
 
-    // Release Bluetooth DRAM since BLE/BT is not used, returning ~30-40KB to FreeRTOS heap
+    // Release controller memory because this firmware does not use Bluetooth.
     esp_bt_controller_mem_release(ESP_BT_MODE_BTDM);
 
     prefs.begin("myPrefs");
@@ -84,8 +82,7 @@ void setup() {
     (void)restartCount;
     Serial.println("[SETUP] Khoi dong UART GNSS: TX=" + String(gnssTX)
                    + ", RX=" + String(gnssRX));
-    // RTCM/NMEA arrive in bursts while network tasks can wait on sockets.
-    // The default 256-byte RX ring can overflow before the next UART read.
+    // Buffer GNSS bursts while network tasks wait on sockets.
     Serial1.setRxBufferSize(8192);
     Serial1.begin(GNSS_BAUD, SERIAL_8N1, static_cast<uint8_t>(gnssRX), static_cast<uint8_t>(gnssTX));
     Serial1.setTimeout(100);
@@ -93,12 +90,12 @@ void setup() {
     // Restore identity, activation and services before any transport can publish.
     backendAgent.begin();
 
-    const UbxCmdBuilder::GnssSensorType detectedSensorType = detectGnssSensorType();
+    const GnssCmdBuilder::GnssSensorType detectedSensorType = detectGnssSensorType();
     const char *detectedSensorTypeName = "INVALID";
-    if (detectedSensorType == UbxCmdBuilder::GnssSensorType::Ublox) {
+    if (detectedSensorType == GnssCmdBuilder::GnssSensorType::Ublox) {
         detectedSensorTypeName = "UBLOX";
         backendAgent.setDetectedChipIfUnknown("Ublox");
-    } else if (detectedSensorType == UbxCmdBuilder::GnssSensorType::Unicore) {
+    } else if (detectedSensorType == GnssCmdBuilder::GnssSensorType::Unicore) {
         detectedSensorTypeName = "UNICORE";
         backendAgent.setDetectedChipIfUnknown("Unicorecomm");
     }
@@ -107,18 +104,18 @@ void setup() {
     prefs.end();
 
     if (needReset) {
-        if (detectedSensorType == UbxCmdBuilder::GnssSensorType::Unicore) {
+        if (detectedSensorType == GnssCmdBuilder::GnssSensorType::Unicore) {
             Serial.println("[SETUP] Cau hinh UM980 lan dau tien...");
             bootstrapUM980();
         }
-        else if (detectedSensorType == UbxCmdBuilder::GnssSensorType::Ublox) {
+        else if (detectedSensorType == GnssCmdBuilder::GnssSensorType::Ublox) {
             Serial.println("[SETUP] Cau hinh u-blox lan dau tien...");
             bootstrapUblox();
         }
         else {
             Serial.println("[SETUP][ERROR] Chip GNSS khong hop le, bo qua cau hinh.");
         }
-        if (detectedSensorType != UbxCmdBuilder::GnssSensorType::Invalid) {
+        if (detectedSensorType != GnssCmdBuilder::GnssSensorType::Invalid) {
             Serial.println("[SETUP] Da cau hinh lai tat ca ve mac dinh, khoi dong de ap dung cau hinh.");
             ESP.restart(); // Khởi động lại để áp dụng cấu hình mới
         }
@@ -126,7 +123,6 @@ void setup() {
         Serial.println("[SETUP] Da nhan dien chip GNSS: " + String(detectedSensorTypeName));
     }
 
-    // Khởi động mạng
     // Keep the local console responsive even if Wi-Fi/GSM cannot connect.
     Serial.println("[SETUP] Starting Serial Command task before network setup.");
     xTaskCreatePinnedToCore(taskSerialCommand, "Serial CMD Task", SERIAL_COMMAND_TASK_STACK_BYTES,
@@ -266,7 +262,7 @@ __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter) {
 }
 __attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void* const parameter) {
     auto* const rtcmState = static_cast<RtcmState*>(parameter);
-    // Có tranh chấp tài nguyên với task RTCM và NTRIP publish
+    // Read the shared GNSS snapshot under its mutex before checking network health.
     String healthPayload = "";
     uint32_t loopStartTime = 0;
     while (true) {
@@ -363,28 +359,28 @@ static void settleModemBeforeNtrip() {
 void initPrefs() {
     prefs.clear();
     prefs.putBool("NEED_RESET", false);
-    prefs.putInt("RSTRT_COUNT", 0); // chưa cấu hình được, lấy được
-    prefs.putString("CONNECTION_TYPE", "4G");
+    prefs.putInt("RSTRT_COUNT", 0);
     // Hai giá trị hợp lệ: "4G" và "WIFI". Giá trị này được nạp khi khởi động.
+    prefs.putString("CONNECTION_TYPE", "4G");
     prefs.putString("GNSS_MDL_TYPE", "INVALID");
 
-    prefs.putString("APN", APN); // cấu hình đc, chưa lấy đc
-    prefs.putString("WIFI_SSID", WIFI_SSID); // cấu hình đc, lấy đc
-    prefs.putString("WIFI_PASS", WIFI_PASSWORD); // cấu hình đc, lấy đc
-    prefs.putString("GPRS_USER", ""); // cấu hình đc, chưa lấy đc
-    prefs.putString("GPRS_PASS", ""); // cấu hình đc, chưa lấy đc
-    prefs.putString("NTRIP_SERVER", NTRIP_CASTER_ADDRESS); // cấu hình được, lấy được
-    prefs.putUShort("NTRIP_PORT", NTRIP_CASTER_PORT); // cấu hình được, lấy được
-    prefs.putString("NTRIP_MPT", NTRIP_MOUNTPOINT); // cấu hình được, lấy được
-    prefs.putString("NT_AUTH_BS", NTRIP_AUTH_BASE_STATION); // cấu hình được, lấy được
+    prefs.putString("APN", APN);
+    prefs.putString("WIFI_SSID", WIFI_SSID);
+    prefs.putString("WIFI_PASS", WIFI_PASSWORD);
+    prefs.putString("GPRS_USER", "");
+    prefs.putString("GPRS_PASS", "");
+    prefs.putString("NTRIP_SERVER", NTRIP_CASTER_ADDRESS);
+    prefs.putUShort("NTRIP_PORT", NTRIP_CASTER_PORT);
+    prefs.putString("NTRIP_MPT", NTRIP_MOUNTPOINT);
+    prefs.putString("NT_AUTH_BS", NTRIP_AUTH_BASE_STATION);
 
-    prefs.putString("MQTT_SERVER", MQTT_SERVER); // cấu hình được, lấy được
-    prefs.putUShort("MQTT_PORT", MQTT_PORT); // cấu hình được, lấy được
-    prefs.putString("MQTT_USER", MQTT_USER); // cấu hình đc, lấy được
-    prefs.putString("MQTT_PASS", MQTT_PASS); // cấu hình đc, lấy được
+    prefs.putString("MQTT_SERVER", MQTT_SERVER);
+    prefs.putUShort("MQTT_PORT", MQTT_PORT);
+    prefs.putString("MQTT_USER", MQTT_USER);
+    prefs.putString("MQTT_PASS", MQTT_PASS);
 
-    prefs.putString("TPC_SUB_CMD", TOPIC_SUB_CMD); // cấu hình được, lấy được
-    prefs.putString("TPC_HEALTH", TOPIC_PUB_HEALTH); // cấu hình đc, lấy được
+    prefs.putString("TPC_SUB_CMD", TOPIC_SUB_CMD);
+    prefs.putString("TPC_HEALTH", TOPIC_PUB_HEALTH);
 }
 
 static void serviceMqtt(const bool reconnect) {

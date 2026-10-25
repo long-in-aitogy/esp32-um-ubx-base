@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-// Represents the lock state of a station, which can be either locked for all servers or locked for a subset of servers.
+// Whole-device lock plus independent locks for source servers 1 and 2.
 struct StationLock {
     bool all = false;
     uint8_t servers = 0;

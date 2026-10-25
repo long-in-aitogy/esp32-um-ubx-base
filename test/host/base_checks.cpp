@@ -2,13 +2,15 @@
 #include "functions/Unicore_Output.h"
 #include "functions/Base_Sample.h"
 #include "functions/Device_Token.h"
-#include "functions/ubx_cmd_builder.h"
+#include "functions/gnss_cmd_builder.h"
 #include "functions/Ubx_Reply.h"
+#include "functions/Unicore_Reply.h"
+#include "functions/unicore_commands.h"
 #include <cassert>
 #include <iostream>
 #include <string>
 
-using namespace UbxCmdBuilder;
+using namespace GnssCmdBuilder;
 
 void checkPackets(const Command &bytes) {
     size_t offset = 0;
@@ -25,6 +27,45 @@ void checkPackets(const Command &bytes) {
 }
 
 int main(int argc, char **argv) {
+    const std::string umCommand = "mode rover\r\n";
+    const auto umReply = [&]() {
+        return UnicoreReply(reinterpret_cast<const uint8_t *>(umCommand.data()), umCommand.size());
+    };
+    const auto feedUm = [](UnicoreReply &reply, const std::string &text) {
+        size_t matched = 0;
+        for (unsigned char c : text) matched += reply.feed(c);
+        return matched;
+    };
+    auto um = umReply();
+    assert(feedUm(um, "$GPGGA,noise\r\n$command,saveconfig,response: OK\r\n") == 0);
+    assert(um.state == UnicoreReply::State::Pending);
+    assert(feedUm(um, "$command,MODE ROVER,response: OK\r\n") == 1);
+    assert(um.state == UnicoreReply::State::Ok);
+    for (const std::string response : {"NOT OK", "PARSING FAILD NO MATCHING FUNC", "ERROR"}) {
+        auto rejected = umReply();
+        assert(feedUm(rejected, "$command,mode rover,response: " + response + "\r\n") == 1);
+        assert(rejected.state == UnicoreReply::State::Error);
+    }
+    um = umReply();
+    assert(feedUm(um, "$command,mode rover,response: \r\n") == 0);
+    assert(feedUm(um, "$command,mode rover,response: OK*00\r\n") == 0);
+    assert(feedUm(um, "$command,mode rover,response: OK*xx\r\n") == 0);
+    // Real N4 response example; checksum includes '$', unlike standard NMEA.
+    const std::string survey = "MODE ROVER SURVEY\r\n";
+    UnicoreReply checksummed(reinterpret_cast<const uint8_t *>(survey.data()), survey.size());
+    assert(feedUm(checksummed, "$command,MODE ROVER SURVEY,response: OK*1F\r\n") == 1);
+    assert(checksummed.state == UnicoreReply::State::Ok);
+    um = umReply();
+    assert(feedUm(um, "$command," + std::string(500, 'x') + "\r\n") == 0);
+    assert(feedUm(um, "$command,broken$command,mode rover,response: ok\r\n") == 1);
+    assert(um.state == UnicoreReply::State::Ok);
+    for (const std::string &invalid : std::vector<std::string>{"", "mode rover\r\nsaveconfig\r\n", std::string("mode \xB5\x62", 7)}) {
+        UnicoreReply rejected(reinterpret_cast<const uint8_t *>(invalid.data()), invalid.size());
+        assert(!rejected.key[0]);
+    }
+    assert(!UnicoreReply(nullptr, 0).key[0]);
+    assert(buildRoverCommand(GnssSensorType::Invalid).empty());
+    assert(sensorTypeFromString("Unicorecomm") == GnssSensorType::Unicore);
     const auto tokenValid = [](const std::string &token) {
         return isDeviceBearerToken(token.data(), token.size());
     };
@@ -71,6 +112,15 @@ int main(int argc, char **argv) {
         routeUnicoreOutput(reinterpret_cast<uint8_t *>(shortened.data()), length, 2);
     }
     GnssOptions usb, uart;
+    const auto ephemeris = UnicoreCommands::buildEphemerisOutputCommands("com2");
+    assert(ephemeris.size() == 5);
+    assert(UnicoreCommands::buildEphemerisOutputCommands("COM9").empty());
+    for (const auto &command : ephemeris) {
+        UnicoreReply reply(command.data(), command.size());
+        assert(reply.key[0]);
+        const std::string line(command.begin(), command.end());
+        assert(line.find(" COM2 1\r\n") != std::string::npos);
+    }
     uart.ports = {"UART1"};
     for (const auto type : {GnssSensorType::Ublox, GnssSensorType::Unicore}) {
         const auto survey = buildBaseSurveyInCommand(300, 1.0, type, uart);
@@ -123,6 +173,12 @@ int main(int argc, char **argv) {
             assert(output.find("mode base 10.7500000000 106.5000000000 12.5000\r\n") != std::string::npos);
             assert(output.find("com3") == std::string::npos);
             assert(output.find("rtcm1074 com2 1") != std::string::npos);
+            for (const auto &commands : {survey, fixed}) {
+                const auto bytes = commandListToBytes(commands);
+                const std::string configured(bytes.begin(), bytes.end());
+                for (const char *id : {"1019", "1020", "1042", "1045"})
+                    assert(configured.find(std::string("rtcm") + id + " com2 1\r\n") != std::string::npos);
+            }
         }
     }
     auto output = buildUbloxOutputConfigCommand(usb);
@@ -130,7 +186,7 @@ int main(int argc, char **argv) {
     checkPackets(output);
     assert(output == buildUbloxOutputConfigCommand(uart));
 
-    // Optional stdin bridge lets the Python check use real CORS command bytes.
+    // Route hexadecimal packets from stdin and emit the resulting bytes for comparison.
     if (argc > 1) {
         const bool ublox = std::string(argv[1]) == "Ublox";
         std::string hex;
