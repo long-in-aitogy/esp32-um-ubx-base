@@ -6,13 +6,10 @@
 #include <Preferences.h>
 
 extern Preferences prefs;
+extern SemaphoreHandle_t gnssSerialMutex;
 
 // ================= CẤU HÌNH CHÂN CẮM VÀ TỐC ĐỘ SERIAL =================
-#if BOARD_HELTEC
-inline constexpr int RX_GNSS = 41; // Nối TXD (Hàng dưới) của UM980
-inline constexpr int TX_GNSS = 42; // Nối RXD (Hàng dưới) của UM980
-inline constexpr int LED_PIN = 35;
-#elif BOARD_2A53N
+#if BOARD_2A53N
 inline constexpr int RX_GNSS = 22; // Nối TXD (Hàng dưới) của UM980
 inline constexpr int TX_GNSS = 23; // Nối RXD (Hàng dưới) của UM980
 inline constexpr int LED_PIN = 2;
@@ -22,6 +19,8 @@ inline constexpr int TX_GNSS = 19; // Nối RXD (Hàng dưới) của UM980
 inline constexpr int LED_PIN = 2;
 #endif
 inline constexpr int GNSS_BAUD = 115200;
+// UART on the Unicore receiver connected to the ESP32 GNSS link.
+inline constexpr uint8_t GNSS_UNICORE_PORT = 2;
 
 // ================= CẤU HÌNH CÁC TASK =================
 inline constexpr int MUTEX_TIMEOUT_MS = 1500; // Thời gian tối đa để chờ mutex (ms)
@@ -51,10 +50,19 @@ inline constexpr char NTRIP_AUTH_BASE_STATION[] = "12345";
 
 // ================ CẤU HÌNH MQTT =================
 
-inline constexpr char MQTT_SERVER[] = "aitogy.asia";
+inline constexpr char MQTT_SERVER[] = "45.117.179.134";
 inline constexpr uint16_t MQTT_PORT = 1883;
 inline constexpr char MQTT_USER[] = "mqttUser";
 inline constexpr char MQTT_PASS[] = "MqttPassword123$%^";
+
+// Version/topic defaults used by cors/geodetic/agent_universal.py and the
+// cors_dashboard backend.  Values can still be overridden from Preferences.
+inline constexpr char AGENT_VERSION[] = "V2.3.5";
+inline constexpr char BACKEND_HOST[] = "base.aitogy.com";
+inline constexpr uint16_t BACKEND_WEBSOCKET_PORT = 8000;
+inline constexpr uint32_t BACKEND_STATUS_INTERVAL_MS = 5000;
+inline constexpr uint32_t BACKEND_CONTROL_STALE_MS = 45000;
+inline constexpr uint32_t BACKEND_CONTROL_RECOVERY_MS = 5000;
 
 inline constexpr char TOPIC_SUB_CMD[] = "tdm2402/um980_base_001/cmd";
 inline constexpr char TOPIC_PUB_HEALTH[] = "tdm2402/um980_base_001/health";

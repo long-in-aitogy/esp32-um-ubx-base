@@ -1,11 +1,81 @@
 #include "functions/cmd_handler.h"
 #include <vector>
 #include <Preferences.h>
+#include "Prog_Config.h"
 #include "functions/ubx_cmd_builder.h"
+#include "functions/Backend_Agent.h"
+#include <cstring>
+
+extern SemaphoreHandle_t rtcmBufferMutex;
 
 extern Preferences prefs;
 
 namespace cmd_helper {
+
+    void printGnssResponse(const uint8_t *data, size_t length)
+    {
+        bool printable = length > 0;
+        for (size_t i = 0; i < length; ++i) {
+            if (data[i] < 0x20 && data[i] != '\r' && data[i] != '\n' && data[i] != '\t') {
+                printable = false;
+                break;
+            }
+        }
+
+        if (printable) {
+            String response;
+            response.reserve(length);
+            for (size_t i = 0; i < length; ++i) {
+                response += static_cast<char>(data[i]);
+            }
+            Serial.println("[GNSS RESPONSE][ASCII] " + response);
+            return;
+        }
+
+        Serial.print("[GNSS RESPONSE][HEX] ");
+        for (size_t i = 0; i < length; ++i) {
+            if (data[i] < 0x10) {
+                Serial.print('0');
+            }
+            Serial.print(data[i], HEX);
+            if (i + 1 < length) {
+                Serial.print(' ');
+            }
+        }
+        Serial.println();
+    }
+
+    void readGnssResponse()
+    {
+        constexpr uint32_t RESPONSE_TIMEOUT_MS = 500;
+        constexpr uint32_t RESPONSE_IDLE_MS = 80;
+        constexpr size_t RESPONSE_BUFFER_SIZE = 512;
+        uint8_t response[RESPONSE_BUFFER_SIZE] = {};
+        size_t length = 0;
+        uint32_t lastByteAt = millis();
+        const uint32_t startedAt = millis();
+
+        while (millis() - startedAt < RESPONSE_TIMEOUT_MS) {
+            while (Serial1.available() > 0) {
+                const int value = Serial1.read();
+                if (length < RESPONSE_BUFFER_SIZE) {
+                    response[length++] = static_cast<uint8_t>(value);
+                }
+                lastByteAt = millis();
+            }
+
+            if (length > 0 && millis() - lastByteAt >= RESPONSE_IDLE_MS) {
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(2));
+        }
+
+        if (length == 0) {
+            Serial.println("[GNSS RESPONSE] Khong co phan hoi trong thoi gian cho.");
+        } else {
+            printGnssResponse(response, length);
+        }
+    }
 
     struct PreferenceMapping {
         const char *command;
@@ -62,10 +132,17 @@ namespace cmd_helper {
     inline void sendGnssCommands(const UbxCmdBuilder::CommandList &commands)
     {
         const UbxCmdBuilder::Command commandBytes = UbxCmdBuilder::commandListToBytes(commands);
+        if (gnssSerialMutex == nullptr ||
+            !xSemaphoreTake(gnssSerialMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
+            Serial.println("[GNSS COMMAND][ERROR] Khong lay duoc mutex Serial1.");
+            return;
+        }
         if (!commandBytes.empty()) {
             Serial1.write(commandBytes.data(), commandBytes.size());
         }
         Serial1.flush();
+        readGnssResponse();
+        xSemaphoreGive(gnssSerialMutex);
     }
 
 } // namespace cmd_helper
@@ -97,6 +174,7 @@ std::vector<String> splitCommand(const String &command) {
 
 cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
     UbxCmdBuilder::GnssOptions options;
+    options.ports = {"UART1"};
     UbxCmdBuilder::CommandList commands;
     prefs.begin("myPrefs", true);
     const String configuredSensorType = prefs.isKey("GNSS_MDL_TYPE")
@@ -104,6 +182,11 @@ cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
         : "UBLOX";
     const UbxCmdBuilder::GnssSensorType sensorType =
         UbxCmdBuilder::sensorTypeFromString(configuredSensorType);
+    if (sensorType == UbxCmdBuilder::GnssSensorType::Invalid) {
+        prefs.end();
+        Serial.println("[MQTT COMMAND DOWNLINK] LOI - Chip GNSS dang o trang thai INVALID.");
+        return CMD_ACTION_NONE;
+    }
     prefs.end();
 
     if (cmdWords.empty()) {
@@ -231,6 +314,17 @@ cmd_action_t handleEspCommand(const std::vector<String> &cmdWords) {
             Serial.println("[MQTT COMMAND DOWNLINK] Lenh yeu cau cau hinh 4G PASS");
             return cmd_helper::saveStringPreference("GPRS_PASS", cmdWords[3]);
         }
+        if (cmdWords[1] == "BACKEND" && cmdWords[2] == "HOST") {
+            return cmd_helper::saveStringPreference("BACKEND_HOST", cmdWords[3]);
+        }
+        if (cmdWords[1] == "BACKEND" && cmdWords[2] == "PORT") {
+            const long port = cmdWords[3].toInt();
+            if (port >= 1 && port <= 65535) {
+                return cmd_helper::saveUShortPreference("BACKEND_PORT", static_cast<uint16_t>(port));
+            }
+            Serial.println("[BACKEND] Port must be 1..65535.");
+            return CMD_ACTION_NONE;
+        }
     }
     
     Serial.println("[MQTT COMMAND DOWNLINK] This command is not yet implemented.");
@@ -284,6 +378,16 @@ cmd_action_t handleCommand(std::vector<String> &cmdWords) {
     if (cmdWords[1] == "GNSS") {
         if (cmdWords.size() < 3) {
             Serial.println("[MQTT COMMAND DOWNLINK] Error: Incomplete GNSS command.");
+            return CMD_ACTION_NONE;
+        }
+        if (cmdWords.size() == 3 && cmdWords[2] == "ROVER") {
+            if (backendAgent.workflowActive()) {
+                Serial.println("[GNSS ROVER][ERROR] Dung workflow hien tai truoc khi thu lai");
+            } else {
+                const bool confirmed = backendAgent.applyRoverMode();
+                Serial.println(confirmed ? "[GNSS ROVER] Rover va GGA da xac nhan"
+                                         : "[GNSS ROVER][ERROR] Chua xac nhan Rover/GGA");
+            }
             return CMD_ACTION_NONE;
         }
         if (cmdWords[2] == "BASE") {
