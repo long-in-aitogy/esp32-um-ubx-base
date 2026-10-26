@@ -22,6 +22,17 @@ MUTED = colors.HexColor("#536678")
 WIDTH = A4[0] - 36 * mm
 
 
+def _resolve_asset(base, relative):
+    """Resolve a catalogue asset without allowing it to escape its directory."""
+    base = Path(base).resolve()
+    asset = (base / relative).resolve()
+    try:
+        asset.relative_to(base)
+    except ValueError as exc:
+        raise ValueError(f"Asset path escapes the catalogue directory: {relative}") from exc
+    return asset
+
+
 def fonts(directory=None):
     if directory:
         base = Path(directory)
@@ -83,76 +94,102 @@ class Catalogue(BaseDocTemplate):
             self.canv.addOutlineEntry(flowable.getPlainText(), key, level=level, closed=False)
 
 
+def _code_block(lines, index, sheet):
+    block = []
+    index += 1
+    while index < len(lines) and not lines[index].startswith("```"):
+        block.append(html.escape(lines[index]).replace(" ", "&#160;"))
+        index += 1
+    flowable = KeepTogether([Paragraph("<br/>".join(block) or "&#160;", sheet["code"])])
+    return flowable, index + 1
+
+
+def _table(lines, index, sheet):
+    rows = []
+    while index < len(lines) and lines[index].strip().startswith("|"):
+        cells = [cell.strip() for cell in lines[index].strip().strip("|").split("|")]
+        if not all(re.fullmatch(r":?-+:?", cell.replace(" ", "")) for cell in cells):
+            style = sheet["head"] if not rows else sheet["cell"]
+            rows.append([Paragraph(inline(cell), style) for cell in cells])
+        index += 1
+    count = len(rows[0])
+    ratios = [0.43, 0.57] if count == 2 else [1 / count] * count
+    table = LongTable(rows, colWidths=[WIDTH * ratio for ratio in ratios],
+                      repeatRows=1, hAlign="LEFT", spaceAfter=10)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), INK),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F1F5F8")]),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 7),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, ACCENT),
+    ]))
+    return table, index
+
+
+def _image(line, source, sheet):
+    match = re.fullmatch(r"!\[([^\]]+)\]\(([^)]+)\)", line)
+    if not match:
+        return None
+    picture = Image(str(_resolve_asset(source.parent, match[2])))
+    factor = min(WIDTH / picture.imageWidth, 105 * mm / picture.imageHeight)
+    picture.drawWidth = picture.imageWidth * factor
+    picture.drawHeight = picture.imageHeight * factor
+    return KeepTogether([
+        picture, Spacer(1, 4), Paragraph(inline(match[1]), sheet["caption"]), Spacer(1, 8)
+    ])
+
+
+def _paragraph(lines, index, sheet):
+    paragraph = [lines[index].strip()]
+    index += 1
+    while index < len(lines) and lines[index].strip() and not re.match(
+            r"^(#|\||```|!\[|\d+\. |\- )", lines[index]):
+        paragraph.append(lines[index].strip())
+        index += 1
+    return Paragraph(inline(" ".join(paragraph)), sheet["body"]), index
+
+
+def _flowable(lines, index, line, source, sheet):
+    if line.startswith("```"):
+        return _code_block(lines, index, sheet)
+    if line.startswith("|"):
+        return _table(lines, index, sheet)
+
+    image = _image(line, source, sheet)
+    if image:
+        return image, index + 1
+
+    match = re.match(r"^(#{1,3}) (.+)$", line)
+    if match:
+        return Paragraph(inline(match[2]), sheet[f"h{len(match[1])}"]), index + 1
+
+    match = re.match(r"^(\d+\.|-) (.+)$", line)
+    if match:
+        return Paragraph(inline(match[2]), sheet["list"], bulletText=match[1]), index + 1
+    return _paragraph(lines, index, sheet)
+
+
+def _story(source, sheet):
+    lines = source.read_text(encoding="utf-8").splitlines()
+    story = []
+    index = 0
+    while index < len(lines):
+        line = lines[index].strip()
+        if not line:
+            index += 1
+            continue
+        flowable, index = _flowable(lines, index, line, source, sheet)
+        story.append(flowable)
+    return story, lines[0].removeprefix("# ")
+
+
 def render(source, output):
     sheet = styles()
-    lines = source.read_text().splitlines()
-    story = []
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        if not line:
-            i += 1
-            continue
-        if line.startswith("```"):
-            block = []
-            i += 1
-            while i < len(lines) and not lines[i].startswith("```"):
-                block.append(html.escape(lines[i]).replace(" ", "&#160;"))
-                i += 1
-            story.append(KeepTogether([Paragraph("<br/>".join(block) or "&#160;", sheet["code"])]))
-            i += 1
-            continue
-        if line.startswith("|"):
-            rows = []
-            while i < len(lines) and lines[i].strip().startswith("|"):
-                cells = [cell.strip() for cell in lines[i].strip().strip("|").split("|")]
-                if not all(re.fullmatch(r":?-+:?", cell.replace(" ", "")) for cell in cells):
-                    style = sheet["head"] if not rows else sheet["cell"]
-                    rows.append([Paragraph(inline(cell), style) for cell in cells])
-                i += 1
-            count = len(rows[0])
-            ratios = [0.43, 0.57] if count == 2 else [1 / count] * count
-            table = LongTable(rows, colWidths=[WIDTH * ratio for ratio in ratios],
-                              repeatRows=1, hAlign="LEFT", spaceAfter=10)
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), INK),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F1F5F8")]),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 7),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ("LINEBELOW", (0, 0), (-1, 0), 0.5, ACCENT),
-            ]))
-            story.append(table)
-            continue
-        match = re.fullmatch(r"!\[([^\]]+)\]\(([^)]+)\)", line)
-        if match:
-            picture = Image(str(source.parent / match[2]))
-            factor = min(WIDTH / picture.imageWidth, 105 * mm / picture.imageHeight)
-            picture.drawWidth = picture.imageWidth * factor
-            picture.drawHeight = picture.imageHeight * factor
-            story.append(KeepTogether([picture, Spacer(1, 4), Paragraph(inline(match[1]), sheet["caption"]), Spacer(1, 8)]))
-            i += 1
-            continue
-        match = re.match(r"^(#{1,3}) (.+)$", line)
-        if match:
-            story.append(Paragraph(inline(match[2]), sheet[f"h{len(match[1])}"]))
-            i += 1
-            continue
-        match = re.match(r"^(\d+\.|-) (.+)$", line)
-        if match:
-            story.append(Paragraph(inline(match[2]), sheet["list"], bulletText=match[1]))
-            i += 1
-            continue
-        paragraph = [line]
-        i += 1
-        while i < len(lines) and lines[i].strip() and not re.match(r"^(#|\||```|!\[|\d+\. |\- )", lines[i]):
-            paragraph.append(lines[i].strip())
-            i += 1
-        story.append(Paragraph(inline(" ".join(paragraph)), sheet["body"]))
+    story, title = _story(source, sheet)
 
-    title = lines[0].removeprefix("# ")
     label = "NỘI BỘ" if "inside" in source.stem else "KHÁCH HÀNG"
 
     def page(canvas, doc):
