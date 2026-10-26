@@ -8,5 +8,4 @@ CommandList buildBaseFixedLlaCommand(double lat, double lon, double alt, float a
 CommandList buildBaseRtcmOutputCommand(const String &message, const String &port, bool enabled);
 CommandList buildRoverCommand();
 CommandList buildEphemerisOutputCommands(const String &port);
-CommandList buildLteConfig(const String &method, uint32_t duration, double lat, double lon, double alt);
 }

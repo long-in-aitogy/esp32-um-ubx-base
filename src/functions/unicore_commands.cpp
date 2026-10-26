@@ -126,22 +126,6 @@ using namespace GnssCmdBuilder;
         return commands;
     }
 
-    CommandList buildLteConfig(const String &setupMethod, uint32_t duration, double lat, double lon, double alt)
-    {
-        CommandList commands = {asciiCommand("FRESET\r\n"), asciiCommand("unlogall\r\n")};
-        String method = setupMethod;
-        method.toUpperCase();
-        commands.push_back(method == "SURVEY_IN" ? asciiCommand("mode base time " + String(duration) + "\r\n") : asciiCommand("mode base " + String(lat, 10) + " " + String(lon, 10) + " " + String(alt, 4) + "\r\n"));
-        static constexpr std::array<const char *, 17> RTCM = {
-            "1006", "1033", "1074", "1124", "1084", "1094", "1114", "1077", "1127",
-            "1087", "1097", "1117", "1042", "1019", "1020", "1045", "1044",
-        };
-        for (const char *message : RTCM)
-            commands.push_back(asciiCommand("rtcm" + String(message) + " com2 1\r\n"));
-        commands.push_back(asciiCommand("saveconfig\r\n"));
-        return commands;
-    }
-
     CommandList buildBaseSurveyInCommand(uint32_t duration, float accuracy, const GnssOptions &options) {
         CommandList commands;
         commands.push_back(asciiCommand("unlogall\r\n"));

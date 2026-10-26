@@ -91,9 +91,6 @@ namespace GnssCmdBuilder {
         return UbloxCommands::buildOutputConfigCommand(options);
     }
     void routeUbloxOutput(uint8_t *data, size_t length) { UbloxCommands::routeUbloxOutput(data, length); }
-    CommandList buildLteUnicoreConfig(const String &method, uint32_t duration, double lat, double lon, double alt) {
-        return UnicoreCommands::buildLteConfig(method, duration, lat, lon, alt);
-    }
 #if PROGRAM_DEBUG
     String debugCommand(const Command &command)
     {
