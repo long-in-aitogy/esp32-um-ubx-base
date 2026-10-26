@@ -178,6 +178,24 @@ using namespace GnssCmdBuilder;
         return commands;
     }
 
+    CommandList buildBaseAllRtcmOutputCommand(const String &port, bool enabled) {
+        String normalizedPort = port;
+        normalizedPort.trim();
+        normalizedPort.toUpperCase();
+        if (!isValidUnicorePort(normalizedPort)) return {};
+
+        static constexpr std::array<const char *, 17> RTCM = {
+            {"1006", "1033", "1074", "1124", "1084", "1094", "1114", "1077", "1127",
+             "1087", "1097", "1117", "1042", "1019", "1020", "1045", "1044"}
+        };
+        CommandList commands;
+        for (const char *message : RTCM)
+            commands.push_back(asciiCommand("rtcm" + String(message) + " " + normalizedPort +
+                                            " " + String(enabled ? 1 : 0) + "\r\n"));
+        commands.push_back(asciiCommand("saveconfig\r\n"));
+        return commands;
+    }
+
     CommandList buildRoverCommand() {
         const String port = "com" + String(GNSS_UNICORE_PORT);
         return {asciiCommand("mode rover\r\n"),

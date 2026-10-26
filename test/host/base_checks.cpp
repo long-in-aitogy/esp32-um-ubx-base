@@ -115,6 +115,13 @@ int main(int argc, char **argv) {
     const auto ephemeris = UnicoreCommands::buildEphemerisOutputCommands("com2");
     assert(ephemeris.size() == 5);
     assert(UnicoreCommands::buildEphemerisOutputCommands("COM9").empty());
+    const auto unicoreAll = UnicoreCommands::buildBaseAllRtcmOutputCommand("COM2", true);
+    assert(unicoreAll.size() == 18);
+    const auto unicoreAllText = commandListToBytes(unicoreAll);
+    const std::string unicoreAllOutput(unicoreAllText.begin(), unicoreAllText.end());
+    assert(unicoreAllOutput.find("rtcm1006 COM2 1\r\n") != std::string::npos);
+    assert(unicoreAllOutput.find("rtcm1044 COM2 1\r\n") != std::string::npos);
+    assert(UnicoreCommands::buildBaseAllRtcmOutputCommand("COM9", true).empty());
     for (const auto &command : ephemeris) {
         UnicoreReply reply(command.data(), command.size());
         assert(reply.key[0]);
@@ -122,12 +129,15 @@ int main(int argc, char **argv) {
         assert(line.find(" COM2 1\r\n") != std::string::npos);
     }
     uart.ports = {"UART1"};
+    uart.outputMode = OutputMode::RtcmOnly;
     for (const auto type : {GnssSensorType::Ublox, GnssSensorType::Unicore}) {
         const auto survey = buildBaseSurveyInCommand(300, 1.0, type, uart);
         const auto fixed = buildBaseFixedLlaCommand(10.75, 106.5, 12.5, 0.01, type, uart);
         const auto rover = buildRoverCommand(type);
         assert(!survey.empty() && !fixed.empty() && !rover.empty());
         if (type == GnssSensorType::Ublox) {
+            const auto all = buildBaseAllRtcmOutputCommand("UART1", true, type);
+            assert(all.size() == 2);
             assert(survey[0][8] == 1 && fixed[0][8] == 2 && fixed[0][9] == 1);
             assert(survey[0][30] == 44 && survey[0][31] == 1);
             assert(rover[1][8] == 0);
@@ -172,15 +182,32 @@ int main(int argc, char **argv) {
             const std::string output(text.begin(), text.end());
             assert(output.find("mode base 10.7500000000 106.5000000000 12.5000\r\n") != std::string::npos);
             assert(output.find("com3") == std::string::npos);
+            assert(output.find("gpgga com2 1\r\n") == std::string::npos);
+            assert(output.find("gpgsa com2 1\r\n") == std::string::npos);
+            assert(output.find("gpgsv com2 1\r\n") == std::string::npos);
+            assert(output.find("gpgst com2 1\r\n") == std::string::npos);
             assert(output.find("rtcm1074 com2 1") != std::string::npos);
             for (const auto &commands : {survey, fixed}) {
                 const auto bytes = commandListToBytes(commands);
                 const std::string configured(bytes.begin(), bytes.end());
+                assert(configured.find("gpgga com2 1\r\n") == std::string::npos);
+                assert(configured.find("gpgsa com2 1\r\n") == std::string::npos);
+                assert(configured.find("gpgsv com2 1\r\n") == std::string::npos);
+                assert(configured.find("gpgst com2 1\r\n") == std::string::npos);
                 for (const char *id : {"1019", "1020", "1042", "1045"})
                     assert(configured.find(std::string("rtcm") + id + " com2 1\r\n") != std::string::npos);
             }
         }
     }
+    GnssOptions diagnostics = uart;
+    diagnostics.outputMode = OutputMode::DiagnosticsRtcm;
+    const auto diagnosticSurvey = buildBaseSurveyInCommand(
+        120, 10.0, GnssSensorType::Unicore, diagnostics);
+    const auto diagnosticText = commandListToBytes(diagnosticSurvey);
+    const std::string diagnosticOutput(diagnosticText.begin(), diagnosticText.end());
+    assert(diagnosticOutput.find("gpgga com2 1\r\n") != std::string::npos);
+    assert(diagnosticOutput.find("rtcm1074 com2 1\r\n") != std::string::npos);
+
     auto output = buildUbloxOutputConfigCommand(usb);
     routeUbloxOutput(output.data(), output.size());
     checkPackets(output);

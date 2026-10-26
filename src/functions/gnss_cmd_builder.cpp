@@ -82,6 +82,14 @@ namespace GnssCmdBuilder {
         return {};
     }
 
+    CommandList buildBaseAllRtcmOutputCommand(const String &port, bool enabled,
+                                              GnssSensorType sensorType)
+    {
+        if (sensorType == GnssSensorType::Ublox) return UbloxCommands::buildBaseAllRtcmOutputCommand(port, enabled);
+        if (sensorType == GnssSensorType::Unicore) return UnicoreCommands::buildBaseAllRtcmOutputCommand(port, enabled);
+        return {};
+    }
+
     CommandList buildRoverCommand(GnssSensorType type) {
         if (type == GnssSensorType::Ublox) return UbloxCommands::buildRoverCommand();
         if (type == GnssSensorType::Unicore) return UnicoreCommands::buildRoverCommand();
