@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <type_traits>
+inline bool isDigit(char value) { return value >= '0' && value <= '9'; }
 
 class String : public std::string {
 public:

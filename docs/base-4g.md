@@ -10,7 +10,7 @@ Mặc định thiết bị dùng 4G; có thể chuyển sang Wi-Fi bằng lệnh
 | --- | --- | --- |
 | Tọa độ chính xác (`FIXED_LLA`) | `EXECUTE_RAW_COMMANDS` + `original_config` | Gửi nguyên lệnh tọa độ do backend tạo, lưu cấu hình và loại chip. |
 | Survey-in (`SURVEY_IN`) | `EXECUTE_RAW_COMMANDS` + `original_config` | Gửi lệnh khảo sát do backend tạo. Unicore dùng thời gian khảo sát; u-blox có thêm ngưỡng chính xác, đúng theo command builder của CORS. |
-| Auto base (`AUTO_CORS`) | `TRIGGER_AUTO_BASE` | Chuyển rover, nhận cải chính CORS, đợi RTK FIX/FLOAT ổn định và lấy mẫu, đặt lại base rồi phát RTCM tới caster. |
+| Auto base (`AUTO_CORS`) | `TRIGGER_AUTO_BASE` | Chuyển rover, nhận cải chính CORS, đợi RTK_FIXED với GGA mới, lấy mẫu, đặt lại base rồi phát RTCM tới caster. |
 | Khóa/mở trạm | `LOCK_DEVICE` / `UNLOCK_DEVICE` | Giữ kênh quản lý; ngừng output RTCM theo phạm vi khóa. |
 
 Base di động ở đây là bộ base có thể mang đến điểm đặt mới. Khi phát cải chính,
@@ -19,21 +19,22 @@ không tiếp tục dùng tọa độ của điểm đặt cũ.
 
 Loại GNSS được chọn từ CORS (`sensor_type`: `Ublox` hoặc `Unicorecomm`), lưu
 trong NVS và dùng cho auto base. Cùng một firmware chứa cả hai bộ lệnh.
-`UNKNOWN` lúc chưa cấu hình là trạng thái bình thường; firmware chưa tự nhận
-diện model bằng truy vấn phần cứng. Nhánh u-blox yêu cầu receiver hỗ trợ
+Boot dò receiver bằng UBX-MON-VER hoặc VERSION trên các baud hỗ trợ;
+`UNKNOWN` có thể xuất hiện trước khi nhận diện hoặc khi chưa có phản hồi. Nhánh u-blox yêu cầu receiver hỗ trợ
 UBX-CFG-TMODE3, như ZED-F9P. Nhánh Unicore dùng bộ lệnh UM980/UM982 trong CORS.
 
 ## Kết nối phần cứng
 
 - ESP32 TDM240x: RX GNSS GPIO18, TX GNSS GPIO19; UART GNSS 115200 baud.
 - Unicore: nối cổng COM2 của receiver theo cấu hình mặc định. Có thể đặt
-  `-DGNSS_UNICORE_PORT=1` hoặc `3` khi biên dịch nếu dây nối dùng cổng khác.
+  hằng `GNSS_UNICORE_PORT` trong `include/Prog_Config.h` nếu dây nối dùng cổng khác;
+  phải đối chiếu cả nhánh bootstrap COM2, không dùng `-D` để ghi đè hằng C++ này.
 - u-blox: nối UART1, đặt UART1 115200 baud trước khi dùng. Firmware chuyển
   cấu hình output USB/UART2 do backend tạo sang UART1 và tính lại checksum UBX.
 - Modem: RX ESP32 GPIO16, TX ESP32 GPIO17; APN theo SIM/nhà mạng.
 
-Firmware không còn gửi lệnh khởi tạo UM980 vô điều kiện lúc boot. Lệnh GNSS
-được chọn khi cấu hình base từ CORS. Với Unicore, các lệnh log COM3 do backend
+Firmware chỉ chạy bootstrap theo chip nhận diện trong lần đầu/reset mặc định;
+không ghi lại cấu hình UM980 vô điều kiện ở mọi lần boot. Với Unicore, các lệnh log COM3 do backend
 tạo được chuyển sang cổng nối ESP32. Tọa độ và thời gian khảo sát giữ nguyên.
 
 ## Đưa thiết bị lên CORS
@@ -113,10 +114,10 @@ Chạy kiểm tra host, không cần gắn ESP32:
 
 ```sh
 c++ -std=c++17 -fsanitize=address,undefined -g -Itest/host -Iinclude \
-  test/host/base_checks.cpp src/functions/ubx_cmd_builder.cpp \
+  test/host/base_checks.cpp src/functions/gnss_cmd_builder.cpp src/functions/ublox_commands.cpp src/functions/unicore_commands.cpp \
   -o /tmp/esp32-base-checks
 /tmp/esp32-base-checks
-python3 -B test/host/check_cors.py ../cors /tmp/esp32-base-checks
+python3 -B test/host/check_cors.py /path/to/cors /tmp/esp32-base-checks
 ```
 
 Kiểm tra này chạy bộ tạo lệnh C++ thật, kiểm tra khóa, checksum, routing UART
@@ -125,8 +126,34 @@ bộ routing firmware cho fixed/survey của cả hai loại chip.
 
 Kiểm tra thực địa còn cần: nhận đúng GNSS, survey hoàn tất, auto base đạt FIX,
 rover nhận được cải chính, độ đúng tọa độ và khóa/mở từng máy chủ sau reboot.
-Trạng thái lệnh thành công hiện xác nhận gửi UART; chưa phải readback xác nhận
-receiver đã chấp nhận cấu hình. ESP32 chuyển tiếp RTCM nguyên byte, không giải
+Auto base hướng tới 60 mẫu trong 60 giây, chỉ lấy RTK_FIXED và cần ít nhất 15
+mẫu hợp lệ. Không mặc định chấp nhận RTK_FLOAT hoặc luôn có đủ 60 mẫu.
+Với Unicore qua backend và auto base, lệnh cấu hình chỉ thành công khi nhận phản hồi đúng tên lệnh,
+`$command,<command>,response: OK`, trong 8 giây. Checksum được kiểm tra nếu có.
+Phản hồi lỗi (kể cả `NO MATCHING FUNC`), ghi UART thiếu hoặc timeout sẽ dừng
+batch và báo lỗi về backend. Task đọc GNSS nhường UART trong lúc chờ ACK.
+Reset chỉ gửi một lần; sau ACK đợi thêm 2 giây trước lệnh tiếp theo.
+ACK xác nhận receiver nhận lệnh; chưa thay thế readback cấu hình sau reboot.
+Các lệnh ATG qua terminal và cấu hình khởi động cũ vẫn dùng cơ chế gửi UART.
+
+Với u-blox, bước chuyển Rover trong auto base kiểm tra ACK và đọc lại
+CFG-TMODE3; các batch cấu hình base còn lại vẫn chỉ xác nhận gửi UART.
+ESP32 chuyển tiếp RTCM nguyên byte, không giải
 mã datum RTCM 1021/1023/1025 như Python agent. Phần chuyển VN2000 hiện có của
 ESP32 dùng tham số tích hợp/tỉnh; cần kiểm chứng hệ tọa độ thực tế trước khi
 dùng kết quả auto base cho đo đạc.
+
+## Tách giao thức GNSS
+
+- `gnss_cmd_builder.h/.cpp`: kiểu dữ liệu chung và chọn bộ tạo lệnh theo chip.
+- `ublox_commands.h/.cpp`: tạo/routing gói UBX nhị phân cho u-blox.
+- `Ubx_Reply.h`: đọc khung UBX, kiểm tra checksum; auto base dùng cho ACK/NAK và readback.
+- `unicore_commands.h/.cpp`: tạo lệnh ASCII cho UM980/UM982.
+- Khởi động UM980 bật thêm ephemeris `1019/1020/1042/1044/1045` trên COM2,
+  chu kỳ 1 giây, trước `saveconfig`. Cấu hình fixed/survey tiếp tục chọn
+  ephemeris theo hệ vệ tinh được bật.
+- `Unicore_Reply.h`: đọc phản hồi ASCII của UM, khớp tên lệnh và kiểm tra `OK` chính xác.
+
+Luồng Unicore từ chối dữ liệu nhị phân và nhiều dòng lệnh trong cùng một gói,
+để mỗi lệnh gửi đi có một phản hồi được kiểm tra riêng. Các truy vấn trạng thái
+`mode`/`log` vẫn đi theo luồng truy vấn, không yêu cầu ACK cấu hình.

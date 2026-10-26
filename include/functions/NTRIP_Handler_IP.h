@@ -6,7 +6,7 @@
 #include <Arduino.h>
 #include "Top_Lvl_Config.h"
 #include "hardware/Connection_type.h"
-#include "functions/ubx_cmd_builder.h"
+#include "functions/gnss_cmd_builder.h"
 
 extern SemaphoreHandle_t rtcmBufferMutex;
 extern SemaphoreHandle_t tcpStreamMutex;
@@ -16,7 +16,7 @@ extern SemaphoreHandle_t tcpStreamMutex;
 int setupNTRIP();
 int bootstrapUM980();
 int bootstrapUblox();
-UbxCmdBuilder::GnssSensorType detectGnssSensorType();
+GnssCmdBuilder::GnssSensorType detectGnssSensorType();
 int loopNTRIP(String& rtcmData);
 int connectNTRIP();
 bool isNtripConnected();
@@ -34,5 +34,7 @@ bool startNtripRover(const String &host, uint16_t port, const String &username,
 int loopNtripRover();
 void stopNtripRover();
 bool ntripRoverActive();
+uint32_t ntripRoverBytesReceived();
+uint32_t ntripRoverPacketsReceived();
 
 #endif

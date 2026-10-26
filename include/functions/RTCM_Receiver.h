@@ -12,9 +12,8 @@ struct RtcmMessageCounts {
 	uint32_t values[RTCM_SUPPORTED_MESSAGE_TYPE_COUNT] = {};
 };
 
-// GNSS telemetry is intentionally limited to NMEA-derived values and opaque
-// RTCM byte counters. No RTCM message type/CRC decoder lives in the ESP32
-// agent; the backend receives the raw stream when it needs to decode it.
+// Snapshot of NMEA-derived position/quality and UART/frame counters.
+// RTCM frames are counted and forwarded without CRC or message-type decoding.
 struct GnssTelemetrySnapshot {
 	bool hasData = false;
 	uint32_t lastDataMs = 0;

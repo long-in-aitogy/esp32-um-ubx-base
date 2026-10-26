@@ -2,7 +2,8 @@
 #include <vector>
 #include <Preferences.h>
 #include "Prog_Config.h"
-#include "functions/ubx_cmd_builder.h"
+#include "functions/gnss_cmd_builder.h"
+#include "functions/Backend_Agent.h"
 #include <cstring>
 
 extern SemaphoreHandle_t rtcmBufferMutex;
@@ -128,9 +129,9 @@ namespace cmd_helper {
         return nullptr;
     }
 
-    inline void sendGnssCommands(const UbxCmdBuilder::CommandList &commands)
+    inline void sendGnssCommands(const GnssCmdBuilder::CommandList &commands)
     {
-        const UbxCmdBuilder::Command commandBytes = UbxCmdBuilder::commandListToBytes(commands);
+        const GnssCmdBuilder::Command commandBytes = GnssCmdBuilder::commandListToBytes(commands);
         if (gnssSerialMutex == nullptr ||
             !xSemaphoreTake(gnssSerialMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
             Serial.println("[GNSS COMMAND][ERROR] Khong lay duoc mutex Serial1.");
@@ -172,16 +173,16 @@ std::vector<String> splitCommand(const String &command) {
 }
 
 cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
-    UbxCmdBuilder::GnssOptions options;
+    GnssCmdBuilder::GnssOptions options;
     options.ports = {"UART1"};
-    UbxCmdBuilder::CommandList commands;
+    GnssCmdBuilder::CommandList commands;
     prefs.begin("myPrefs", true);
     const String configuredSensorType = prefs.isKey("GNSS_MDL_TYPE")
         ? prefs.getString("GNSS_MDL_TYPE")
         : "UBLOX";
-    const UbxCmdBuilder::GnssSensorType sensorType =
-        UbxCmdBuilder::sensorTypeFromString(configuredSensorType);
-    if (sensorType == UbxCmdBuilder::GnssSensorType::Invalid) {
+    const GnssCmdBuilder::GnssSensorType sensorType =
+        GnssCmdBuilder::sensorTypeFromString(configuredSensorType);
+    if (sensorType == GnssCmdBuilder::GnssSensorType::Invalid) {
         prefs.end();
         Serial.println("[MQTT COMMAND DOWNLINK] LOI - Chip GNSS dang o trang thai INVALID.");
         return CMD_ACTION_NONE;
@@ -201,7 +202,7 @@ cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
         uint32_t duration = cmdWords[1].toInt();
         float accuracy = cmdWords[2].toFloat();
         
-        commands = UbxCmdBuilder::buildBaseSurveyInCommand(duration, accuracy, sensorType, options);
+        commands = GnssCmdBuilder::buildBaseSurveyInCommand(duration, accuracy, sensorType, options);
         cmd_helper::sendGnssCommands(commands);
         Serial.println("[MQTT COMMAND DOWNLINK] Da gui lenh cau hinh GNSS BASE SURVEY_IN.");
 
@@ -216,7 +217,7 @@ cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
         double alt = cmdWords[3].toDouble();
         float accuracy = cmdWords[4].toFloat();
 
-        commands = UbxCmdBuilder::buildBaseFixedLlaCommand(lat, lon, alt, accuracy, sensorType, options);
+        commands = GnssCmdBuilder::buildBaseFixedLlaCommand(lat, lon, alt, accuracy, sensorType, options);
         cmd_helper::sendGnssCommands(commands);
         Serial.println("[MQTT COMMAND DOWNLINK] Da gui lenh cau hinh GNSS BASE FIXED LLA.");
 
@@ -231,7 +232,7 @@ cmd_action_t handleGnssBaseCommand(const std::vector<String> &cmdWords) {
         const bool enabled = action == "ON";
         Serial.println("[MQTT COMMAND DOWNLINK] Lenh yeu cau " + action + " RTCM " + cmdWords[0] +
                        " tren cong " + cmdWords[1]);
-        commands = UbxCmdBuilder::buildBaseRtcmOutputCommand(cmdWords[0], cmdWords[1], enabled, sensorType);
+        commands = GnssCmdBuilder::buildBaseRtcmOutputCommand(cmdWords[0], cmdWords[1], enabled, sensorType);
         if (commands.empty()) {
             Serial.println("[MQTT COMMAND DOWNLINK] LOI - RTCM message hoac cong khong hop le.");
             return CMD_ACTION_NONE;
@@ -377,6 +378,16 @@ cmd_action_t handleCommand(std::vector<String> &cmdWords) {
     if (cmdWords[1] == "GNSS") {
         if (cmdWords.size() < 3) {
             Serial.println("[MQTT COMMAND DOWNLINK] Error: Incomplete GNSS command.");
+            return CMD_ACTION_NONE;
+        }
+        if (cmdWords.size() == 3 && cmdWords[2] == "ROVER") {
+            if (backendAgent.workflowActive()) {
+                Serial.println("[GNSS ROVER][ERROR] Dung workflow hien tai truoc khi thu lai");
+            } else {
+                const bool confirmed = backendAgent.applyRoverMode();
+                Serial.println(confirmed ? "[GNSS ROVER] Rover va GGA da xac nhan"
+                                         : "[GNSS ROVER][ERROR] Chua xac nhan Rover/GGA");
+            }
             return CMD_ACTION_NONE;
         }
         if (cmdWords[2] == "BASE") {

@@ -1,204 +1,266 @@
-# Hướng dẫn sử dụng thiết bị Base GNSS qua 4G và Wi-Fi AITOGY-BASE-ESP (Bản cho khách hàng)
+# AITOGY-GNSS-BASE-ESP-UBX
 
-Tên thiết bị: **AITOGY-GNSS-BASE-ESP-UBX**
+**Hướng dẫn khách hàng | Firmware V2.3.5 | Cập nhật 25/10/2026**
 
-## Các loại thiết bị được sử dụng:
+## 1. Phạm vi và nguyên tắc vận hành
 
-- Module TDM2402:
-    - Chip ESP32-WROOM-32E (Xử lý chính, kết nối WiFi)
-    - Chip SIMCOM A7600C (Kết nối 4G)
+Bộ AITOGY-BASE-ESP nhận dữ liệu từ receiver GNSS, chuyển tiếp RTCM lên caster bằng 4G hoặc Wi-Fi và nhận điều khiển từ hệ thống CORS. Anten base phải đứng yên khi phát cải chính. Sau khi di chuyển anten, cấu hình lại tọa độ base trước khi cho rover sử dụng.
 
-- Module GNSS (Nhận dữ liệu GNSS, xuất dữ liệu RTCM qua UART): U-Blox ZED F6P
+Tài liệu mô tả firmware **V2.3.5**, cập nhật **25/10/2026**. Kết quả biên dịch và kiểm tra phần mềm không thay thế nghiệm thu ngoài thực địa. Không cam kết thời gian khởi động cố định hay độ chính xác đo khi chưa kiểm tra receiver, anten, mạng cải chính và hệ tọa độ.
 
-## Cấu hình mặc định
+| Chế độ | Khi sử dụng | Điều kiện hoàn thành |
+| --- | --- | --- |
+| FIXED_LLA | Đã có tọa độ điểm đặt anten đáng tin cậy. | Gửi cấu hình fixed, kiểm tra tọa độ receiver và luồng RTCM. |
+| SURVEY_IN | Cần receiver tự khảo sát vị trí đứng yên. | Receiver kết thúc khảo sát; gửi lệnh thành công không có nghĩa khảo sát đã xong. |
+| AUTO_CORS | Có tài khoản rover nhận cải chính từ CORS. | Chuyển rover, nhận cải chính, lấy mẫu RTK_FIXED, đặt lại base và kiểm tra phát RTCM. |
 
-Đây là cấu hình mặc định của thiết bị khi xuất xưởng. Người dùng có thể thay đổi các thông số này bằng cách gửi lệnh qua Serial Monitor hoặc qua MQTT.
+Độ cao phải dùng đúng quy ước của tọa độ cung cấp. Với cấu hình fixed theo LLA, sử dụng độ cao ellipsoid. Không thay trực tiếp bằng độ cao thủy chuẩn hoặc bỏ qua chiều cao anten/điểm quy chiếu.
 
-- Kết nối mạng: 4G (có thể chuyển sang Wi-Fi bằng lệnh `ATG ESP SET CONNECTION WIFI`)
-- MQTT broker: `aitogy.asia`, cổng `1883`
-- MQTT topic để ESP publish health check: `tdm2402/um980_base_001/health`
-- MQTT topic được ESP subscribe để nhận lệnh: `tdm2402/um980_base_001/cmd`
-- NTRIP caster: `aitogy.com.vn`, cổng `2101`
-- Mountpoint: `/test`
+## 2. Kết nối và chuẩn bị
 
-## Quá trình hoạt động
+| Đường tín hiệu TDM240x | Kết nối |
+| --- | --- |
+| GPIO18 / RX GNSS của ESP32 | Nhận từ TX của receiver GNSS. |
+| GPIO19 / TX GNSS của ESP32 | Gửi vào RX của receiver GNSS. |
+| GND | Chung mass giữa ESP32, receiver và bộ nguồn theo thiết kế bộ thiết bị. |
+| GPIO16 / RX modem | Nhận từ TX modem. |
+| GPIO17 / TX modem | Gửi vào RX modem. |
+| Serial console | 115200 baud; gửi một dòng lệnh và kết thúc bằng LF. |
+| UART GNSS | Mặc định 115200 baud, 8N1. |
 
-Tùy theo điều kiện mạng, ESP32 sẽ mất khoảng 15 đến 20 giây để khởi động, kết nối mạng 4G, đăng nhập MQTT broker và NTRIP caster. Khi kết nối và đăng nhập thành công, ESP32 sẽ lấy dữ liệu RTCM từ module GNSS và gửi lên NTRIP caster, đồng thời gửi một bản sao của bản tin này lên một topic MQTT.
+Đối chiếu nhãn cổng và sơ đồ của đúng board trước khi đấu dây. Không suy ra chân cắm hay mức nguồn từ hình ảnh của board khác. Gắn anten GNSS đúng cổng, đặt nơi thoáng trời, cố định cơ khí; kiểm tra SIM/APN và anten 4G trước khi chạy auto base.
 
-Để thông báo trạng thái sức khỏe thiết bị, mỗi 30 giây ESP32 sẽ gửi một bản tin health check lên topic MQTT đã cấu hình. Bản tin này có định dạng JSON như sau:
+Bản u-blox dùng receiver hỗ trợ các lệnh cấu hình mà firmware tạo, mục tiêu là dòng ZED-F9P phù hợp. Nối UART1 receiver tới RX18/TX19 ESP32. Một số receiver/phiên bản chỉ hỗ trợ một phần CFG-VALSET hoặc TMODE3; không suy luận mọi receiver u-blox đều tương thích.
+
+## 3. Cấu hình mặc định và thông tin cần bàn giao
+
+| Thông số | Giá trị/ý nghĩa trong firmware |
+| --- | --- |
+| Kết nối mạng | 4G; có thể chuyển Wi-Fi bằng ATG. |
+| APN | v-internet; thay theo SIM thực tế. |
+| MQTT broker mặc định | 45.117.179.134:1883; phải khớp hệ thống CORS đang triển khai. |
+| Backend WebSocket | base.aitogy.com:8000, giao thức ws; cần endpoint thiết bị thực sự truy cập được. |
+| Caster dự phòng trong cấu hình mặc định | aitogy.com.vn:2101, mountpoint /test; không phải thông tin cấp phát cho mọi khách hàng. |
+| Kênh quản lý chính | Topic theo serial esp_... do thiết bị tạo; quản trị viên cấp quyền trên CORS. |
+| Trạng thái backend | Chu kỳ mặc định 5 giây; kết nối mạng có thể làm chậm việc gửi. |
+| Health kiểu cũ | Chu kỳ mặc định 30 giây. |
+
+Đơn vị triển khai bàn giao: serial, tên trạm, loại GNSS, caster/mountpoint phát, tài khoản cải chính đầu vào nếu dùng AUTO_CORS, APN hoặc Wi-Fi và người quản lý trên CORS. Mật khẩu/token do quản trị viên cấp riêng, không lấy từ ví dụ trong tài liệu.
+
+## 4. Đưa thiết bị lên CORS
+
+1. Cấp nguồn ổn định, mở console 115200 baud và ghi lại serial `esp_...`, phiên bản firmware, loại chip, baud nhận diện được.
+2. Cấu hình mạng, MQTT và backend theo triển khai. Các chuỗi trong dấu `<...>` là giá trị cần thay, không nhập nguyên dấu ngoặc.
+3. Lưu thông tin trước, gửi lệnh chọn mạng sau cùng vì lệnh đó khởi động lại thiết bị.
+4. Trên CORS, quản trị viên nhận/cấp thiết bị, đặt tên, triển khai license và chọn đúng loại chip.
+5. Triển khai dịch vụ caster: server 1, server 2 nếu cần, mountpoint, tài khoản phát và chế độ luôn phát/theo yêu cầu.
+6. Chọn FIXED_LLA, SURVEY_IN hoặc AUTO_CORS. Theo dõi kết quả lệnh và tiến độ, sau đó kiểm tra luồng RTCM bằng rover độc lập.
+
+Ví dụ cấu hình 4G:
+
+```text
+ATG ESP SET 4G APN <apn>
+ATG MQTT SET SERVER <mqtt_host>
+ATG MQTT SET PORT 1883
+ATG MQTT SET USER <mqtt_user>
+ATG MQTT SET PASS <mqtt_password>
+ATG ESP SET BACKEND HOST <backend_host>
+ATG ESP SET BACKEND PORT 8000
+ATG ESP SET CONNECTION 4G
+```
+
+Ví dụ đổi sang Wi-Fi:
+
+```text
+ATG ESP SET WIFI SSID <ssid>
+ATG ESP SET WIFI PASS <wifi_password>
+ATG ESP SET CONNECTION WIFI
+```
+
+Console ATG tách tham số theo dấu cách, không hỗ trợ chuỗi có khoảng trắng hoặc giá trị rỗng. Nếu SSID/mật khẩu cần dạng này, liên hệ kỹ thuật; không dùng dấu nháy để giả lập chuỗi.
+
+Thiết bị chưa được cấp quyền hoặc chưa có license vẫn có thể báo trạng thái nhưng không đủ điều kiện phát RTCM. Trạng thái `online` của kênh quản lý cũng chưa chứng minh rover nhận được cải chính.
+
+## 5. Chọn chế độ base và xác nhận kết quả
+
+### 5.1 Tọa độ cố định
+
+Nhập vĩ độ/kinh độ dạng độ thập phân và độ cao ellipsoid tính bằng mét. Kiểm tra đúng điểm quy chiếu anten và hệ tọa độ. Sau khi cấu hình, đối chiếu tọa độ đọc từ receiver, sự hiện diện của bản tin tọa độ base và tọa độ rover tại điểm kiểm tra.
+
+### 5.2 Survey-in
+
+Đặt anten đứng yên, nhập thời gian khảo sát theo giây. Nhánh u-blox cấu hình TMODE3 với cả thời gian tối thiểu và giới hạn độ chính xác. Receiver tự quyết định kết thúc survey theo điều kiện cấu hình; theo dõi trạng thái thực tế sau khi gửi.
+
+Survey-in không tự tạo ra tọa độ tuyệt đối đạt độ chính xác khảo sát chỉ vì chọn ngưỡng nhỏ. Khi cần tọa độ gắn với hệ quy chiếu cụ thể, dùng điểm đã biết hoặc AUTO_CORS và thực hiện kiểm tra độc lập.
+
+### 5.3 Auto base từ CORS
+
+Firmware chuyển receiver sang rover, nhận RTCM từ mountpoint cải chính và chỉ chấp nhận GGA mới với trạng thái **RTK_FIXED**. RTK_FLOAT không được dùng làm mẫu auto base.
+
+Luồng mặc định cần 5 lần kiểm tra FIX liên tiếp theo nhịp khoảng 1 giây, sau đó lấy tối đa 60 mẫu trong cửa sổ 60 giây. Cần ít nhất 15 mẫu hợp lệ để tiếp tục; không mặc định coi kết quả luôn có đủ 60 mẫu. Thiết bị đặt lại tọa độ base rồi khôi phục dịch vụ phát đã cấu hình.
+
+Thời gian chờ FIX mặc định 3600 giây; quản trị viên có thể cấu hình theo nghiệp vụ. Khi mất FIX, mất kết nối, thiếu mẫu hoặc có lệnh dừng, xem lý do trong tiến độ workflow. Việc khôi phục kết nối caster sau thất bại không tự chứng minh receiver đã trở về cấu hình base mong muốn.
+
+Phần chuyển VN2000 hiện dùng tham số tích hợp và phép chiếu theo lựa chọn tỉnh/kinh tuyến. Firmware không giải mã các bản tin datum RTCM 1021/1023/1025. Phải đối chiếu mốc kiểm tra thực địa; không coi nhãn VN2000 là chứng nhận độ đúng hệ tọa độ.
+
+## 6. Theo dõi trạng thái và luồng dữ liệu
+
+| Hiển thị/trường | Cách hiểu |
+| --- | --- |
+| awaiting_license / unprovisioned | Chưa đủ điều kiện cấp quyền/license để phát RTCM. |
+| locked | Thiết bị bị khóa toàn bộ; liên hệ quản trị viên. |
+| sleep | Đang chờ kích hoạt luồng theo yêu cầu; chưa chắc là mất mạng. |
+| online | Kênh quản lý hoạt động; cần kiểm tra thêm từng server NTRIP. |
+| auto_setup_* / reference_check* | Workflow đang thực hiện một bước cấu hình hoặc kiểm tra. |
+| last_command_result | Kết quả xử lý lệnh; lệnh khởi động workflow thành công chỉ nghĩa đã nhận việc. |
+| auto_base_progress | Theo dõi phase, số mẫu và lý do completed/failed/stopped của workflow. |
+| server1/2_connected và server1/2_bps | Kết nối và số byte/giây gửi tới từng caster. |
+| rtcm_input_bps | Số byte RTCM/giây được đóng khung ở UART; không phải chứng nhận CRC hợp lệ. |
+| GGA/fix/satellites | Chất lượng nghiệm GNSS và dữ liệu vị trí đang nhận. |
+
+Ví dụ cấu trúc health kiểu cũ (giá trị minh họa):
 
 ```json
 {
-    "uptime_s": 123456,
-    "free_heap_bytes": 123456,
-    "connected_via": "GSM",
-    "rssi_dbm": "-77",
-    "mqtt_ok": true,
-    "ntrip_ok": true,
-    "gnss_data_ok": true,
-    "rtcm_types": {
-        "1005": 12,
-        "1074": 8,
-        "1077": 10,
-        "1084": 0,
-        "1087": 0,
-        "1094": 0,
-        "1097": 0,
-        "1124": 0,
-        "1127": 0,
-        "1230": 0
-    }
+  "uptime_s": 120,
+  "free_heap_bytes": 120000,
+  "connected_via": "GSM",
+  "rssi_dbm": 20,
+  "mqtt_ok": true,
+  "ntrip_ok": true,
+  "gnss_data_ok": true,
+  "rtcm_decoder": false,
+  "rtcm_types": {}
 }
 ```
 
-## Định dạng bản tin Health Check:
+`connected_via` dùng `GSM` hoặc `WiFi`. `gnss_data_ok` phản ánh đã nhận khung RTCM gần đây, trong ngưỡng 5 giây của tác vụ health. `rtcm_types` rỗng vì ESP32 không đếm từng loại bản tin. `rssi_dbm` là tên trường cũ: Wi-Fi dùng RSSI, còn 4G đang giữ giá trị chất lượng tín hiệu thô do modem trả về, chưa tự chuyển sang dBm. Không dùng giá trị đó như số dBm 4G đã hiệu chuẩn.
 
-- `uptime_s`: thời gian hoạt động của ESP32, tính bằng giây. Sẽ reset về 0 khi ESP32 khởi động lại.
-- `free_heap_bytes`: dung lượng RAM còn trống, tính bằng byte.
-- `connected_via`: phương thức kết nối mạng hiện tại, có thể là `GSM` hoặc `WIFI`.
-- `rssi_dbm`: cường độ tín hiệu mạng hiện tại, tính bằng dBm.
-- `mqtt_ok`: trạng thái kết nối MQTT, `true` nếu đang kết nối, `false` nếu không.
-- `ntrip_ok`: trạng thái kết nối NTRIP, `true` nếu đang kết nối, `false` nếu không.
-- `gnss_data_ok`: trạng thái dữ liệu GNSS, `true` nếu đang nhận dữ liệu RTCM từ module GNSS, `false` nếu không.
-- `rtcm_types`: object chứa số lần xuất hiện của từng loại bản tin RTCM trong khoảng 30 giây gần nhất, tương ứng với một chu kỳ health check. Firmware hiện theo dõi các loại `1005`, `1074`, `1077`, `1084`, `1087`, `1094`, `1097`, `1124`, `1127` và `1230`. Giá trị bằng `0` nếu loại bản tin không xuất hiện trong chu kỳ hiện tại.
+Hệ thống nhận NMEA GGA/GSA/GSV/GST để theo dõi GNSS. ESP32 không mặc định tạo một bản sao toàn bộ RTCM lên MQTT. Các trường có tên `valid_packets` hiện là bộ đếm đóng khung, không có kiểm tra CRC RTCM. `hacc` có thể lấy từ GST hoặc fallback HDOP; không coi mọi giá trị `hacc` đều là độ chính xác mét đã xác nhận.
 
-## Cấu hình lên ESP32:
+## 7. Danh mục lệnh ATG
 
-ESP32 nhận nội dung (payload) từ Serial (nếu kết nối serial với máy tính hoặc điện thoại) hoặc qua topic lệnh MQTT đã cấu hình. Mỗi lệnh phải bắt đầu bằng `ATG`; các thành phần được ngăn cách bằng khoảng trắng. Từ khóa phân biệt chữ hoa/chữ thường. Giá trị không được chứa khoảng trắng (ví dụ mật khẩu có khoảng trắng hiện chưa được hỗ trợ).
+ATG dùng để cấu hình kết nối và hỗ trợ kỹ thuật. Ưu tiên CORS để cấu hình base và đọc kết quả lệnh theo từng thiết bị. Từ khóa dùng đúng chữ hoa; mỗi dòng kết thúc bằng LF. Lệnh SET thường lưu cấu hình, cần khởi động lại để kết nối đọc lại giá trị mới.
 
-### Cấu trúc chung
+### 7.1 ESP và mạng
 
-```text
-ATG <NHÓM_LỆNH> <THAO_TÁC> [THAM_SỐ...]
-```
-
-Trong đó:
-
-- `ATG`: tiền tố bắt buộc để firmware nhận diện lệnh.
-- `NHÓM_LỆNH`: thành phần cần tác động: `GNSS`, `ESP`, `MQTT`, `NTRIP` hoặc `CONFIG`.
-- `THAO_TÁC` và `THAM_SỐ`: phụ thuộc vào từng nhóm lệnh bên dưới.
-
-Các lệnh `SET` lưu giá trị vào bộ nhớ Preferences (NVS) của ESP32. Khi thay đổi thông số kết nối đang hoạt động, nên khởi động lại thiết bị để các kết nối được tạo lại với cấu hình mới.
-
-### Cấu hình liên quan tới GNSS
-
-Các lệnh này cấu hình module GNSS ở chế độ base và được gửi qua UART đến module.
-
-| Cú pháp | Giải thích |
+| Cú pháp | Tác dụng |
 | --- | --- |
-| `ATG GNSS BASE SURVEY_IN <thời_gian> <độ_chính_xác>` | Bật chế độ khảo sát vị trí base. `<thời_gian>` là thời gian khảo sát tối thiểu, tính bằng giây; `<độ_chính_xác>` là ngưỡng độ chính xác, tính bằng mét. Ví dụ: `ATG GNSS BASE SURVEY_IN 300 1.0`. |
-| `ATG GNSS BASE FIXED <vĩ_độ> <kinh_độ> <độ_cao> <độ_chính_xác>` | Cấu hình vị trí base cố định theo LLA. Vĩ độ và kinh độ ở đơn vị độ thập phân, độ cao và độ chính xác ở mét. Ví dụ: `ATG GNSS BASE FIXED 10.7769 106.7009 12.5 0.5`. |
-| `ATG GNSS BASE <RTCM_MSG_TYPE> <PORT> ON` | Bật loại bản tin RTCM trên cổng GNSS chỉ định. |
-| `ATG GNSS BASE <RTCM_MSG_TYPE> <PORT> OFF` | Tắt loại bản tin RTCM trên cổng GNSS chỉ định. Với Unicore dùng `COM1`, `COM2` hoặc `COM3`; với UBlox dùng `I2C`, `UART1`, `UART2`, `USB` hoặc `SPI`. Ví dụ: `ATG GNSS BASE 1074 UART2 OFF`. |
-| `ATG GNSS SET CHIP <UBLOX/UNICORE>` | Chọn loại chip GNSS, lưu vào Preferences và khởi động lại ESP32 để áp dụng. |
+| `ATG ESP RESTART` | Khởi động lại ngay. |
+| `ATG ESP SET CONNECTION 4G` | Lưu chọn 4G và khởi động lại. |
+| `ATG ESP SET CONNECTION WIFI` | Lưu chọn Wi-Fi và khởi động lại. |
+| `ATG ESP SET WIFI SSID <ssid>` | Lưu SSID không có khoảng trắng. |
+| `ATG ESP SET WIFI PASS <password>` | Lưu mật khẩu không có khoảng trắng. |
+| `ATG ESP SET 4G APN <apn>` | Lưu APN. |
+| `ATG ESP SET 4G USER <user>` | Lưu tên đăng nhập APN khi nhà mạng yêu cầu. |
+| `ATG ESP SET 4G PASS <password>` | Lưu mật khẩu APN khi nhà mạng yêu cầu. |
+| `ATG ESP SET BACKEND HOST <host>` | Lưu hostname/IP của endpoint WebSocket, không kèm scheme hoặc đường dẫn. |
+| `ATG ESP SET BACKEND PORT <port>` | Lưu cổng WebSocket; chấp nhận 1-65535. |
 
-### Cấu hình liên quan tới chính module ESP
+### 7.2 MQTT và NTRIP phát
 
-| Cú pháp | Giải thích |
+| Cú pháp | Tác dụng |
 | --- | --- |
-| `ATG ESP RESTART` | Khởi động lại ESP32 ngay lập tức. |
-| `ATG ESP SET CONNECTION 4G` | Chuyển phương thức kết nối mạng sang 4G và khởi động lại ESP32 để áp dụng. |
-| `ATG ESP SET CONNECTION WIFI` | Chuyển phương thức kết nối mạng sang Wi-Fi và khởi động lại ESP32 để áp dụng. |
-| `ATG ESP SET WIFI SSID <ssid>` | Lưu tên mạng Wi-Fi cần kết nối. |
-| `ATG ESP SET WIFI PASS <mật_khẩu>` | Lưu mật khẩu mạng Wi-Fi. |
-| `ATG ESP SET 4G APN <apn>` | Lưu APN của nhà mạng 4G. Ví dụ: `ATG ESP SET 4G APN v-internet`. |
-| `ATG ESP SET 4G USER <tên_người_dùng>` | Lưu tên người dùng APN 4G. Ví dụ: `ATG ESP SET 4G USER user`. |
-| `ATG ESP SET 4G PASS <mật_khẩu>` | Lưu mật khẩu APN 4G. Ví dụ: `ATG ESP SET 4G PASS password`. |
+| `ATG MQTT SET SERVER <host>` | Lưu broker MQTT. |
+| `ATG MQTT SET PORT <port>` | Lưu cổng MQTT; nhập số hợp lệ 1-65535. |
+| `ATG MQTT SET USER <user>` | Lưu tên đăng nhập broker. |
+| `ATG MQTT SET PASS <password>` | Lưu mật khẩu broker. |
+| `ATG MQTT SET PUBTPCHEALTH <topic>` | Lưu topic health kiểu cũ. |
+| `ATG MQTT SET SUBTPCCMD <topic>` | Lưu topic subscribe ATG kiểu cũ; thay topic cần kỹ thuật kiểm tra callback thực nhận. |
+| `ATG NTRIP SET CSTRADDR <host>` | Lưu caster mặc định/dự phòng. |
+| `ATG NTRIP SET CSTRPORT <port>` | Lưu cổng caster; nhập số hợp lệ 1-65535. |
+| `ATG NTRIP SET MNTPNT <mountpoint>` | Lưu mountpoint mặc định. |
+| `ATG NTRIP SET CSTRAUTH <password>` | Lưu mật khẩu source nguyên văn; không nhập base64 của username:password. |
 
-### Cấu hình liên quan tới MQTT
+Dịch vụ đã cấp từ CORS có thể ưu tiên hơn cấu hình NTRIP mặc định lưu bằng ATG. Muốn thay tài khoản/mountpoint đang vận hành, chỉnh dịch vụ trên CORS rồi triển khai lại.
 
-| Cú pháp | Giải thích |
+### 7.3 GNSS và đặt lại cấu hình
+
+| Cú pháp | Tác dụng |
 | --- | --- |
-| `ATG MQTT SET SERVER <địa_chỉ>` | Lưu tên miền hoặc địa chỉ IP của MQTT broker. Ví dụ: `ATG MQTT SET SERVER broker.example.com`. |
-| `ATG MQTT SET PORT <cổng>` | Lưu cổng MQTT (số nguyên 0–65535). Ví dụ: `ATG MQTT SET PORT 1883`. |
-| `ATG MQTT SET USER <tên_người_dùng>` | Lưu tên người dùng đăng nhập MQTT. |
-| `ATG MQTT SET PASS <mật_khẩu>` | Lưu mật khẩu đăng nhập MQTT. |
-| `ATG MQTT SET PUBTPCHEALTH <topic>` | Lưu topic publish dữ liệu health check. Ví dụ: `ATG MQTT SET PUBTPCHEALTH tdm2402/node-01/health`. |
-| `ATG MQTT SET SUBTPCCMD <topic>` | Lưu topic subscribe để nhận lệnh MQTT. Ví dụ: `ATG MQTT SET SUBTPCCMD tdm2402/node-01/cmd`. |
+| `ATG GNSS ROVER` | Chuyển receiver sang rover để chẩn đoán; không tự đăng nhập tài khoản rover CORS. |
+| `ATG GNSS BASE SURVEY_IN <seconds> <accuracy_m>` | Gửi batch survey-in theo loại chip; hai tham số vẫn phải có. |
+| `ATG GNSS BASE FIXED <lat> <lon> <alt> <accuracy_m>` | Gửi tọa độ LLA cố định; độ cao tính bằng mét ellipsoid. |
+| `ATG GNSS BASE <message> <port> ON` | Bật bản tin RTCM trên cổng chỉ định. |
+| `ATG GNSS BASE <message> <port> OFF` | Tắt bản tin RTCM trên cổng chỉ định. |
+| `ATG GNSS SET CHIP UBLOX` | Lưu lựa chọn chip và khởi động lại; boot vẫn thực hiện nhận diện phần cứng. |
+| `ATG CONFIG RESET` | Đặt cờ nạp lại mặc định và khởi động lại; có thể làm đổi mạng và cấu hình GNSS. |
 
-### Cấu hình liên quan tới NTRIP
+Cổng lệnh RTCM hỗ trợ I2C/UART1/UART2/USB/SPI; đường nối ESP32 trong cấu hình chuẩn là UART1. Ví dụ: `ATG GNSS BASE 1074 UART1 ON`. Bản tin chưa có trong bảng lệnh firmware có thể bị từ chối dù receiver tự nó hỗ trợ.
 
-| Cú pháp | Giải thích |
+Lệnh ATG kiểu cũ chủ yếu trả log Serial, không có kết quả JSON riêng theo command_id như lệnh CORS. Không coi dòng “đã gửi” là receiver đã chấp nhận cấu hình. Reset cấu hình cục bộ không thay thế thao tác gỡ thiết bị/thu hồi quyền trên CORS; quản trị viên phải xử lý trạng thái cấp phát khi cần.
+
+## 8. RTCM, ephemeris và cấu hình receiver
+
+### 8.1 Bản tin và giới hạn hỗ trợ
+
+Bảng lệnh RTCM cục bộ hiện có 1005, 1074, 1084, 1094, 1124, 1077, 1087, 1097 và 1230. Nhánh u-blox chưa có bộ tạo lệnh ephemeris 1019/1020/1042/1044/1045 như Unicore; không quảng bá tính năng đó chỉ vì firmware dùng chung kiểu Command.
+
+Survey/fixed dùng UBX-CFG-TMODE3; output dùng CFG-VALSET/CFG-MSG và lưu CFG-CFG. Firmware định tuyến các output USB/UART2 trong batch backend về UART1 và tính lại checksum. Cần kiểm tra receiver thực sự hỗ trợ các message/key được cấp.
+
+### 8.2 Kiểm tra trực tiếp bằng u-center
+
+Dùng công cụ cấu hình u-blox phù hợp model và phiên bản receiver. Bộ ảnh dưới đây minh họa giao diện u-center cổ điển đã có trong dự án; tên menu có thể khác ở phiên bản khác. Kết nối đúng cổng USB receiver, xác nhận model/version và baud trước khi thay cấu hình.
+
+1. Chọn kết nối receiver và dùng tự dò baud khi chưa biết tốc độ hiện tại.
+2. Mở Packet Console/Message View để phân biệt NMEA, UBX và RTCM; RTCM không phải văn bản thuần.
+3. Cấu hình UART1 là cổng nối ESP32, kiểm tra baud 115200 và protocol input/output phù hợp.
+4. Trong cấu hình Time Mode/TMODE3, chọn survey-in hoặc fixed và nhập đúng đơn vị.
+5. Bật bản tin cần thiết ở UART1, gửi lệnh, lưu vào bộ nhớ receiver và kiểm tra lại sau mất nguồn.
+
+Không gửi chuỗi ASCII MODE BASE của Unicore vào receiver u-blox. u-blox dùng gói UBX nhị phân và kiểm tra ACK/NAK phù hợp.
+
+### 8.3 Hình minh họa u-center
+
+![Kết nối receiver trong giao diện u-center cổ điển.](imgs/ublox/1.jpg)
+
+![Tự dò baud của kết nối receiver.](imgs/ublox/2.jpg)
+
+![Mở cửa sổ theo dõi bản tin receiver.](imgs/ublox/3.jpg)
+
+![Packet Console hiển thị các loại gói nhận được.](imgs/ublox/4.jpg)
+
+![Mở giao diện cấu hình receiver.](imgs/ublox/5.jpg)
+
+![Chọn cổng UART và baud của receiver.](imgs/ublox/6.jpg)
+
+![Cấu hình Time Mode/survey-in.](imgs/ublox/7.jpg)
+
+![Cấu hình output bản tin trên từng cổng.](imgs/ublox/8.jpg)
+
+
+## 9. Xử lý sự cố
+
+| Dấu hiệu | Kiểm tra và hướng xử lý |
 | --- | --- |
-| `ATG NTRIP SET CSTRADDR <địa_chỉ>` | Lưu tên miền hoặc địa chỉ IP của NTRIP caster. |
-| `ATG NTRIP SET CSTRPORT <cổng>` | Lưu cổng của NTRIP caster (số nguyên 0–65535), thường là `2101`. |
-| `ATG NTRIP SET MNTPNT <mountpoint>` | Lưu mountpoint cần kết nối. Ví dụ: `ATG NTRIP SET MNTPNT VRS_RTCM32`. |
-| `ATG NTRIP SET CSTRAUTH <chuỗi_xác_thực>` | Lưu chuỗi xác thực NTRIP theo định dạng base64. Giá trị này thường là base64 của `username:password`. |
+| Không thấy log console | Đúng cổng USB/driver, 115200 baud, nguồn và cáp truyền dữ liệu. |
+| UNKNOWN/INVALID, không có GGA | RX/TX đấu chéo, chung GND, đúng cổng receiver, đúng baud; kiểm tra trực tiếp receiver khi cần. |
+| MQTT được nhưng CORS chưa quản lý được | Broker/topic theo serial, thiết bị đã nhận/cấp và license; kiểm tra command/result thay vì chỉ nhìn kết nối TCP. |
+| WebSocket không kết nối | Đúng host/port endpoint thiết bị; firmware hiện dùng ws, không phải wss. MQTT vẫn là kênh điều khiển khác. |
+| Có NMEA nhưng RTCM bằng 0 | Đúng chế độ base, survey đã xong, đúng output UART và bản tin RTCM đã bật. |
+| Có RTCM UART nhưng caster không nhận | Đúng source account/mountpoint/version NTRIP; server được bật, không khóa và đủ license/provision. |
+| Có hai kết nối cùng tài khoản rover | Xác minh client nào đo, client nào thuộc dịch vụ monitor/decode trên caster; không xóa tài khoản khi chưa xác định. |
+| Auto base không FIX | Tài khoản rover, mountpoint đầu vào có dữ liệu, GGA mới, cổng RTCM input, anten/độ che khuất và khoảng cách trạm. |
+| Auto base thiếu mẫu | Kiểm tra FIX có duy trì, GGA có mới và đủ mẫu hợp lệ trong cửa sổ lấy mẫu. |
+| Cấu hình GNSS báo lỗi | Đọc ACK/NAK và CFG-TMODE3 readback khi chuyển rover; kiểm tra phiên bản receiver hỗ trợ lệnh đang dùng. |
+| Khởi động lại vẫn dùng cấu hình cũ | Đối chiếu service đang cấp từ CORS với cấu hình ATG; kiểm tra lưu NVS và kết quả triển khai dịch vụ. |
+| Tọa độ lệch dù rover FIX | Hệ quy chiếu, độ cao, chiều cao anten, tọa độ base và phép chuyển VN2000; kiểm tra trên mốc độc lập. |
 
-### Cấu hình toàn hệ thống
+Khi gửi yêu cầu hỗ trợ: cung cấp serial, phiên bản, thời điểm lỗi, phase/lý do workflow, loại receiver, baud/cổng nối, server nào lỗi và log đã che mật khẩu/token. Không gửi lại reset nhiều lần khi chưa xác định lỗi.
 
-| Cú pháp | Giải thích |
-| --- | --- |
-| `ATG CONFIG RESET` | Đánh dấu khôi phục cấu hình mặc định, sau đó khởi động lại ESP32. Lần khởi động kế tiếp sẽ xóa toàn bộ cấu hình đã lưu trong Preferences và nạp lại giá trị mặc định. |
+## 10. Nghiệm thu và bảo trì
 
-> Lưu ý: Firmware hiện không phản hồi trạng thái lệnh qua MQTT. Theo dõi Serial Monitor để kiểm tra log xử lý lệnh; riêng lệnh GNSS sẽ báo lỗi khi thiếu hoặc thừa tham số.
+1. Chụp/ghi nhận đúng đấu dây, nguồn, anten, SIM/APN và serial được cấp.
+2. Tắt/bật nguồn kiểm tra thiết bị nạp đúng nhận dạng, dịch vụ, loại GNSS và cấu hình base.
+3. Với fixed/survey: đối chiếu tọa độ base và bản tin tham chiếu sau khi receiver ổn định.
+4. Với auto base: kiểm tra từng bước chuyển rover, nhận cải chính, RTK_FIXED, số mẫu, chuyển base và phục hồi output.
+5. Dùng rover độc lập kết nối đúng mountpoint, kiểm tra độ tuổi cải chính, FIX và điểm mốc đã biết.
+6. Kiểm tra riêng server 1/2, luôn phát/theo yêu cầu và khóa/mở từng server; khóa không được bị fail-open bỏ qua.
+7. Thử mất mạng rồi phục hồi; kiểm tra kết quả thực tế, không chỉ đèn hoặc nhãn online.
+8. Sau khi di chuyển anten, thay receiver/firmware hoặc thay hệ tọa độ, thực hiện lại phần nghiệm thu liên quan.
 
-## Cấu hình trực tiếp mạch GNSS
+Không có thao tác đo phần cứng tự động nào được thực hiện chỉ bởi việc đọc hoặc xuất bản tài liệu này. Bản hiện tại đã đối chiếu code; nghiệm thu ngoài hiện trường do đơn vị triển khai ghi nhận riêng.
 
-Trong một số trường hợp xảy ra lỗi (chẳng hạn lệch baud rate giữa ESP32 và GNSS), người dùng có thể cấu hình trực tiếp module GNSS bằng cách cắm serial USB vào module GNSS và sử dụng phần mềm U-Center (đối với U-Blox).
+## Tài liệu tham chiếu
 
-### Cài đặt phần mềm U-Center
-
-Người dùng có thể tải và cài đặt u-center từ [trang này](https://www.u-blox.com/en/product/u-center). Chọn U-Center (không phải U-Center 2).
-
-Sau khi cài đặt, mở u-center, chọn đúng cổng COM nối với module GNSS để kết nối.
-
-![Hình minh họa giao diện u-center](imgs/ublox/1.jpg)
-
-Có thể chọn ***Receiver > Autobauding*** để tự động dò tốc độ baud rate của module GNSS. Sau khi kết nối thành công, người dùng có thể gửi các lệnh UBX để cấu hình module GNSS.
-
-![Cài đặt autobauding](imgs/ublox/2.jpg)
-
-### Xem trực tiếp các bản tin được sinh ra từ module GNSS
-
-Chỉ xem được nếu module GNSS đang xuất dữ liệu ra cổng COM USB. Chọn ***View > Packet Console*** để mở cửa sổ xem các bản tin UBX, NMEA và RTCM được sinh ra từ module GNSS.
-
-![Mở view](imgs/ublox/3.jpg)
-
-Packet Console sẽ hiển thị thông tin về các bản tin được sinh ra từ module GNSS, nhưng không phải nội dung bên trong. 
-
-![Packet Console](imgs/ublox/4.jpg)
-
-Để xem nội dung bên trong, chọn ***View > Message View***. Tuy nhiên, các bản tin RTCM không phải dạng plain text đọc được.
-
-### Cài đặt baud rate cho từng cổng của module U-Blox
-
-Mở ***View > Configuration View***.
-
-![Mở menu Configuration View](imgs/ublox/5.jpg)
-
-Trong ***Configuration View***, chọn mục ***PRT*** để cấu hình các cổng của module GNSS. Chọn cổng cần cấu hình (UART1, UART2, USB hoặc SPI). Thay đổi tốc độ baud rate và nhấn ***Send*** để gửi lệnh cấu hình đến module GNSS.
-
-![Cấu hình cổng (PRT)](imgs/ublox/6.jpg)
-
-Trong hệ thống hiện tại, UM980 được nối với ESP32 qua cổng UART1, do đó cần chọn đúng cổng này để cấu hình tốc độ baud.
-
-### Điều chỉnh chế độ base station cho module U-Blox
-
-Vẫn trong ***Configuration View***, chọn tab ***TMODE3*** để cấu hình chế độ base station.
-
-Ở mục ***Mode***, chọn chế độ base station. Có thể chọn chế độ survey-in hoặc fixed position. Nếu chọn survey-in, cần nhập thời gian khảo sát tối thiểu và ngưỡng độ chính xác (khoảng cách sai lệch tối đa).
-
-![Cấu hình chế độ Survey-in](imgs/ublox/7.jpg)
-
-Nếu chọn fixed position, cần nhập tọa độ, gồm: vĩ độ, kinh độ và độ cao.
-
-Nhấn ***Send*** để gửi lệnh cấu hình đến module GNSS.
-
-### Cấu hình các bản tin RTCM xuất ra từng cổng của module U-Blox
-
-Vẫn trong ***Configuration View***, chọn tab ***MSG*** để cấu hình các bản tin xuất ra từng cổng. Chọn loại bản tin RTCM cần xuất, đánh dấu các cổng (UART1, UART2, USB hoặc SPI) để xuất bản tin. Sau đó, nhấn ***Send*** để gửi lệnh cấu hình đến module GNSS.
-
-![Hình minh họa cấu hình bản tin RTCM](imgs/ublox/8.jpg)
-
-Các bản tin có thể cấu hình cho base station bao gồm:
-- F5-05: RTCM 1005
-- F5-4A: RTCM 1074
-- F5-4D: RTCM 1077
-- F5-54: RTCM 1084
-- F5-57: RTCM 1087
-- F5-5E: RTCM 1094
-- F5-61: RTCM 1097
-- F5-7C: RTCM 1124
-- F5-7F: RTCM 1127
-- F5-E6: RTCM 1230
+- [u-blox ZED-F9P Integration Manual](https://content.u-blox.com/sites/default/files/ZED-F9P_IntegrationManual_UBX-18010802.pdf): nguyên tắc survey-in, fixed và cổng receiver; cần chọn đúng phiên bản tài liệu cho thiết bị thực tế.

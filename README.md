@@ -1,6 +1,6 @@
 # ESP32 GNSS Gateway (UM980 / UM982 / u-blox)
 
-Chế độ **base 4G di động** kết nối CORS: nhập tọa độ chính xác (`FIXED_LLA`), survey-in (`SURVEY_IN`), auto base (`AUTO_CORS`) và khóa trạm. 
+Chế độ **base 4G di động** kết nối CORS: nhập tọa độ chính xác (`FIXED_LLA`), survey-in (`SURVEY_IN`), auto base (`AUTO_CORS`) và khóa trạm.
 
 * 📖 **Tài liệu hướng dẫn**: Xem [hướng dẫn kết nối và kiểm tra](docs/base-4g.md).
 * 📝 **Nhật ký thay đổi**: Xem [chi tiết các bản sửa đổi firmware ESP32](CHANGELOG.md).
@@ -37,19 +37,19 @@ Loại GNSS được cấu hình từ CORS; cùng một firmware hỗ trợ cả
 
 ### Tổ chức thư mục:
 ```
-├── .pio/           # Thư mục do PlatformIO tạo ra chứa file biên dịch, 
+├── .pio/           # Thư mục do PlatformIO tạo ra chứa file biên dịch,
 |               thư viện đã cài, v.v. Không chỉnh sửa trực tiếp.
 |               thư mục này không xuất hiện trong repo vì đã được thêm vào .gitignore
-| 
+|
 ├── boards/
 |   └── heltec_wifi_lora_32_v4.json  # Cấu hình PlatformIO để biên dịch
 |                                     mã nguồn cho Heltec V4
 |                                     (đây là file tuỳ chỉnh do PlatformIO chưa
 |                                     duyệt cấu hình Heltec V4 chính thức)
-| 
+|
 ├──lib/                             # Thư viện riêng của dự án (hiện chưa cần thiết).
 |                                  Sẽ được biên dịch thành thư viện liên kết tĩnh
-| 
+|
 ├──include/                         # Header files chứa cấu hình, định nghĩa hằng số,
 |   |                                 khai báo biến, đối tượng và prototype của hàm.
 |   |                                 Ngoại trừ main không có header và một số header
@@ -59,7 +59,7 @@ Loại GNSS được cấu hình từ CORS; cùng một firmware hỗ trợ cả
 |   |
 |   ├── Top_Lvl_Config.h            # Cấu hình cấp cao trước khi biên dịch
 |   └── Prog_Config.h               # Cấu hình hoạt động của chương trình
-| 
+|
 ├──src/                             # Mã nguồn chính của chương trình.
 |    ├── main.cpp                       # Điểm vào chính của chương trình, chứa hàm setup() và loop()
 |    ├── helper.cpp                     # Các hàm phụ trợ để xử lý dữ liệu, kết nối, v.v.
@@ -73,14 +73,14 @@ Loại GNSS được cấu hình từ CORS; cùng một firmware hỗ trợ cả
 |
 ├──test/                            # Thư mục dành cho việc viết unit test
 |                                  và sử dụng PlatformIO Test Runner.
-| 
+|
 ├──variants/                        # Cấu hình biến thể phần cứng (ví dụ: Heltec V4, TDM2402)
 |   |                                được định nghĩa dưới dạng macro trong file header (.h)
 |   |
 |   └── heltec_V4
 |           |
 |           └── pins_arduino.h     # Định nghĩa chân GPIO cho board Heltec V4
-|     
+|
 └──platformio.ini                    # File cấu hình chính của PlatformIO, xác định board,
 ```
 

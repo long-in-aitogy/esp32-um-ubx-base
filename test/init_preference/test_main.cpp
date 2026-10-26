@@ -8,12 +8,10 @@ Preferences prefs;
 
 void setUp(void)
 {
-  // set stuff up here
 }
 
 void tearDown(void)
 {
-  // clean stuff up here
 }
 
 void setup() {
@@ -35,5 +33,5 @@ void setup() {
 }
 
 void loop() {
-  // Nothing to do here, as the tests are run in `setup()`
+  // Preferences are written once during setup; no periodic work is required.
 }

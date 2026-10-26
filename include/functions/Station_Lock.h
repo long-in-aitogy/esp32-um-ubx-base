@@ -3,8 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-// Same semantics as agent_universal.py: an all-device lock blocks commands;
-// scoped locks only block the selected NTRIP outputs.
+// Whole-device lock plus independent locks for source servers 1 and 2.
 struct StationLock {
     bool all = false;
     uint8_t servers = 0;

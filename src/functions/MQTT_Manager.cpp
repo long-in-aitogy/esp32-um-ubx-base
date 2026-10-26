@@ -42,9 +42,7 @@ Client& activeMqttClient() {
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   backendAgent.onMqttMessage(topic, payload, length);
 
-  // Keep the legacy serial-command topic working for installations that have
-  // not migrated their dashboard yet.  The CORS backend uses the pi/devices
-  // command topics handled above.
+  // Dispatch plain-text ATG commands separately from JSON device commands.
   if (strcmp(topic, TOPIC_SUB_CMD) == 0) {
     Serial.printf("[MQTT DOWNLINK] Nhan lenh legacy (%u bytes).\n", length);
     String cmd = "";
@@ -62,7 +60,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       return;
     }
     
-    // Đẩy lệnh xuống UM980 qua Serial1
+    // Phân tích lệnh ATG để cấu hình ESP32, kết nối hoặc receiver GNSS.
     std::vector<String> cmdWords = splitCommand(cmd);
     cmd_action_t action = handleCommand(cmdWords);
     if (action == CMD_ACTION_ESP_RESTART) {
@@ -79,8 +77,7 @@ int setupMQTT() {
   prefs.begin("myPrefs", false);
   mqttServerHost() = prefs.getString("MQTT_SERVER", String(MQTT_SERVER));
   if (mqttServerHost().equalsIgnoreCase("aitogy.asia")) {
-    // Migrate the old firmware default while preserving any user-supplied
-    // broker hostname/IP.
+    // Replace the retired aitogy.asia broker value; retain other stored hosts.
     mqttServerHost() = MQTT_SERVER;
     prefs.putString("MQTT_SERVER", mqttServerHost());
   }
@@ -137,22 +134,14 @@ int connectMQTT() {
 int publishHealth(const String& payload) {
   if (payload.isEmpty()) return -1;
 
-  // The backend-compatible status packet is produced by BackendAgent.  The
-  // old health topic is still published below for backward compatibility.
-  backendAgent.publishStatus(true);
-
-  const uint32_t start = millis();
-  while (!mqtt.connected()) {
-    vTaskDelay(pdMS_TO_TICKS(100));
-    if (millis() - start > 5000) {
-      #if PROGRAM_DEBUG
-      Serial.println("[MQTT] publishHealth: MQTT not connected, aborting publish");
-      #endif
-      return -1;
-    }
-  }
+  // Publish to the configured health topic under the shared transport mutex.
 
   if (tcpStreamMutex != nullptr && xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
+    // TinyGsmClient::connected() can consume modem UART responses too.
+    if (!mqtt.connected()) {
+      xSemaphoreGive(tcpStreamMutex);
+      return -1;
+    }
     prefs.begin("myPrefs", false);
     String topicPubHealth = prefs.getString("TPC_HEALTH", String(TOPIC_PUB_HEALTH));
     prefs.end();
