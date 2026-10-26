@@ -5,9 +5,8 @@
 #include <cctype>
 #include <cstring>
 
-// CORS generates Unicore logs for COM3 (the Python agent's wiring). Route
-// only output-log commands to the UART wired to this ESP32; leave binary
-// packets and other receiver commands untouched.
+// Route RTCM/NMEA output-log commands to the connected receiver port.
+// Leave binary packets and other ASCII commands unchanged.
 inline void routeUnicoreOutput(uint8_t *data, size_t length, uint8_t port) {
     if (!data || port < 1 || port > 3) return;
     size_t tokenLength = 0;

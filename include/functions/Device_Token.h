@@ -1,7 +1,6 @@
 #pragma once
 #include <cstddef>
 
-// Same format as CORS license_manager.is_device_token and agent_universal.py.
 // The backend verifies the exact per-device token; firmware checks its format.
 inline bool isDeviceBearerToken(const char *token, size_t length) {
     if (!token || length < 43 || length > 67

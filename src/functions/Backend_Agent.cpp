@@ -7,6 +7,8 @@
 #include "functions/Unicore_Output.h"
 #include "functions/Base_Sample.h"
 #include "functions/Device_Token.h"
+#include "functions/Ubx_Reply.h"
+#include "functions/Unicore_Reply.h"
 #include "hardware/Connection_type.h"
 #include "hardware/Sim_handler.h"
 #include "hardware/Wifi_handler.h"
@@ -139,9 +141,7 @@ String epochString() {
     if (now > 1700000000) {
         return String(static_cast<unsigned long>(now));
     }
-    // The backend uses this value for diagnostics until SNTP has completed.
-    // It is replaced by a real Unix timestamp as soon as the network clock is
-    // available.
+    // Before clock synchronization, report uptime seconds rather than Unix time.
     return String(static_cast<unsigned long>(millis() / 1000UL));
 }
 
@@ -250,8 +250,7 @@ String tokenFingerprint(const String &token) {
     mbedtls_sha256_free(&context);
 #endif
 
-    // Native/unit-test fallback.  Hardware builds use the backend-compatible
-    // SHA-256 fingerprint above.
+    // Fallback fingerprint when SHA-256 support is absent or hashing fails.
     uint32_t hash = 2166136261UL;
     for (size_t i = 0; i < token.length(); ++i) {
         hash ^= static_cast<uint8_t>(token[i]);
@@ -338,8 +337,7 @@ String licenseCodeFromBase(const String &base) {
         --remainingDigits;
         parts[index] = static_cast<int>(number * pow(10.0, -static_cast<double>(remainingDigits)));
     }
-    // Python keeps this final element as a float because `/ 2` is true
-    // division. Truncating it here changes every generated license code.
+    // Keep the averaged final part in floating point; truncation changes the license code.
     const double finalPart = (parts[length - 2] + parts[length - 1]) / 2.0 + 1.0;
     smoothed[0] = static_cast<double>(parts[0]);
 
@@ -352,8 +350,7 @@ String licenseCodeFromBase(const String &base) {
         smoothed[index + 1] = (smoothed[index] + nextPart) / 2.0;
         const double first = smoothed[index + 1] * exp(-0.2);
         const double second = logarithm * pow(nextPart, 0.2);
-        // nearbyint follows Python's round-to-nearest, ties-to-even under the
-        // default floating-point rounding mode (unlike lround's ties-away).
+        // Use round-to-nearest, ties-to-even under the default rounding mode.
         output += String(static_cast<long>(std::nearbyint(first + second)));
     }
     return output;
@@ -379,9 +376,7 @@ bool licenseMatchesSerial(const String &serial, const String &token) {
         || token == licenseCodeFromBase(licenseBaseForSerial(serial));
 }
 
-// The Python agent applies the VN2000 transformation after it has obtained a
-// position from the rover's NMEA fix. These routines intentionally operate on
-// coordinates only; no RTCM message or CRC is inspected here.
+// Transform receiver coordinates to VN2000; RTCM payloads are not inspected.
 constexpr double WGS84_A = 6378137.0;
 constexpr double WGS84_B = 6356752.31424518;
 constexpr double WGS84_E2 = 1.0 - (WGS84_B * WGS84_B) / (WGS84_A * WGS84_A);
@@ -590,8 +585,7 @@ bool transformItrfToVn2000(double latitudeDeg, double longitudeDeg, double heigh
 } // namespace
 
 // ---------------------------------------------------------------------------
-// Minimal RFC6455 client.  The CORS endpoint is plain ws://, and using the
-// Arduino Client abstraction lets the same code work over Wi-Fi and TinyGSM.
+// Unencrypted RFC6455 client over Wi-Fi or cellular TCP transports.
 // ---------------------------------------------------------------------------
 class BackendAgentWebsocket {
 public:
@@ -867,6 +861,8 @@ namespace {
 BackendAgent backendAgent;
 
 void BackendAgent::begin() {
+    // Image verification uses shared bootloader mappings; do it once before tasks.
+    firmwareSize_ = ESP.getSketchSize();
     loadPreferences();
     ensureDefaultServiceConfig();
 
@@ -879,10 +875,7 @@ void BackendAgent::begin() {
     if (!websocket_) {
         websocket_ = new BackendAgentWebsocket(this);
     }
-    // Configure the secondary backend channel immediately after loading the
-    // persisted serial/token. The object is allocated above, so waiting for
-    // `websocket_ == nullptr` in loop() would otherwise leave it unconfigured
-    // forever.
+    // Initialize the WebSocket endpoint with the restored device identity and token.
     setupWebsocket();
     lastStatusMs_ = 0;
     lastControlCheckMs_ = millis();
@@ -913,7 +906,7 @@ void BackendAgent::loadPreferences() {
         serialNumber_ = String(generated);
         serialNeedsSave = true;
     } else if (serialNumber_.startsWith("LP_")) {
-        // LP_ is reserved for the Windows agent; migrate existing ESP32 IDs.
+        // Replace the legacy LP_ prefix while preserving the device identifier suffix.
         serialNumber_ = String("esp_") + serialNumber_.substring(3);
         serialNeedsSave = true;
     }
@@ -992,8 +985,11 @@ void BackendAgent::ensureDefaultServiceConfig() {
 }
 
 bool BackendAgent::saveStatePreferences() {
-    // Preferences' error-name table in Arduino 2.x does not cover newer NVS
-    // errors. Use the native API and commit this state snapshot once.
+    if (serialNumber_.isEmpty()) {
+        Serial.println("[BACKEND][NVS] Refusing to save state before agent identity is loaded.");
+        return false;
+    }
+    // Persist the state snapshot with native NVS calls and one commit.
     nvs_handle_t handle;
     const esp_err_t opened = useDedicatedBackendPrefs
         ? nvs_open_from_partition(BACKEND_PREFS_PARTITION, BACKEND_PREFS_NAMESPACE, NVS_READWRITE, &handle)
@@ -1060,7 +1056,7 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
             response.indexOf("UB4") >= 0 || response.indexOf("#VERSION") >= 0) {
             break;
         }
-        // If no data arrives within 150ms, no Unicore chip is replying
+        // Stop a silent probe early after 150 ms; silence does not identify the chip.
         if (millis() - startMs > 150 && response.isEmpty()) break;
         delay(10);
     }
@@ -1098,7 +1094,7 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
             }
         }
         if (foundUblox) break;
-        // If no bytes arrive within 150ms, no Ublox chip is replying
+        // Stop early after 150 ms if no partial UBX header or unread data remains.
         if (millis() - startMs > 150 && ubxMatch == 0 && !stream.available()) break;
         delay(10);
     }
@@ -1111,7 +1107,7 @@ bool BackendAgent::detectGnssChip(Stream &stream, bool force) {
         return true;
     }
 
-    // 3. Passive scan: NMEA
+    // 3. Identify u-blox from a proprietary PUBX sentence in the incoming stream.
     startMs = millis();
     String passiveStr = "";
     while (millis() - startMs < 300) {
@@ -1274,12 +1270,56 @@ bool BackendAgent::stopNtripRoverLocked() {
     return true;
 }
 
-bool BackendAgent::writeGnssCommands(const UbxCmdBuilder::CommandList &commands) {
+bool BackendAgent::writeUnicoreCommand(const uint8_t *data, size_t length, String &error) {
+    UnicoreReply reply(data, length);
+    if (!reply.key[0]) { error = "invalid Unicore ASCII command"; return false; }
+    if (!rtcmBufferMutex || xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        error = "GNSS command port is busy";
+        return false;
+    }
+    if (!gnssSerialMutex || xSemaphoreTake(gnssSerialMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        xSemaphoreGive(rtcmBufferMutex);
+        error = "GNSS reader is busy";
+        return false;
+    }
+    // Own UART RX until the matching reply is read; the stream task must not eat the ACK.
+    while (Serial1.available()) Serial1.read();
+    const bool written = Serial1.write(data, length) == length;
+    Serial1.flush();
+    const uint32_t started = millis();
+    bool matched = false;
+    while (written && millis() - started < 8000UL && !matched) {
+        while (Serial1.available()) {
+            if (reply.feed(static_cast<uint8_t>(Serial1.read()))) { matched = true; break; }
+        }
+        if (!matched) vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    xSemaphoreGive(gnssSerialMutex);
+    xSemaphoreGive(rtcmBufferMutex);
+    if (!written) error = String("Unicore UART write failed: ") + reply.key;
+    else if (!matched) error = String("Unicore response timeout: ") + reply.key;
+    else if (reply.state != UnicoreReply::State::Ok) error = String("Unicore rejected command: ") + reply.line;
+    else {
+        Serial.printf("[GNSS][UNICORE] ACK OK: %s\n", reply.line);
+        // A reset can ACK before the receiver actually reboots. Never retry it blindly.
+        if (!std::strcmp(reply.key, "freset") || !std::strcmp(reply.key, "reset")) delay(2000);
+        return true;
+    }
+    Serial.printf("[GNSS][UNICORE][ERROR] %s\n", error.c_str());
+    return false;
+}
+
+bool BackendAgent::writeGnssCommands(const GnssCmdBuilder::CommandList &commands) {
     if (commands.empty()) return false;
     for (const auto &command : commands) {
         uint32_t delayMs = 0;
         if (delayMarker(command.data(), command.size(), delayMs)) {
             delay(delayMs);
+            continue;
+        }
+        if (sensorType_ == "Unicorecomm") {
+            String error;
+            if (!writeUnicoreCommand(command.data(), command.size(), error)) return false;
             continue;
         }
         if (!rtcmBufferMutex
@@ -1295,9 +1335,66 @@ bool BackendAgent::writeGnssCommands(const UbxCmdBuilder::CommandList &commands)
 
 bool BackendAgent::applyRoverMode() {
     if (sensorType_ != "Ublox" && sensorType_ != "Unicorecomm") return false;
-    return writeGnssCommands(UbxCmdBuilder::buildRoverCommand(
-        sensorType_ == "Ublox" ? UbxCmdBuilder::GnssSensorType::Ublox
-                                : UbxCmdBuilder::GnssSensorType::Unicore));
+    Serial.printf("[AUTO BASE] Gui lenh Rover + GGA UART cho chip %s\n", sensorType_.c_str());
+    if (sensorType_ == "Unicorecomm") {
+        return writeGnssCommands(GnssCmdBuilder::buildRoverCommand(GnssCmdBuilder::GnssSensorType::Unicore));
+    }
+    if (!rtcmBufferMutex || xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) return false;
+    if (!gnssSerialMutex || xSemaphoreTake(gnssSerialMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        xSemaphoreGive(rtcmBufferMutex);
+        return false;
+    }
+    // Own both directions until ACK/readback completes; the stream task must
+    // not consume the replies before the workflow can inspect them.
+    auto exchange = [](const GnssCmdBuilder::Command &command, bool poll) {
+        while (Serial1.available()) Serial1.read();
+        if (Serial1.write(command.data(), command.size()) != command.size()) return false;
+        Serial1.flush();
+        UbxReply reply;
+        const uint32_t started = millis();
+        while (millis() - started < 1500UL) {
+            while (Serial1.available()) {
+                if (!reply.feed(static_cast<uint8_t>(Serial1.read()))) continue;
+                if (poll && reply.frame[2] == 0x06 && reply.frame[3] == 0x71 && reply.length == 48) {
+                    const uint8_t mode = reply.frame[8];
+                    Serial.printf("[AUTO BASE] UBX-CFG-TMODE3 readback mode=%u (0=Rover)\n", mode);
+                    return mode == 0;
+                }
+                if (!poll && reply.length == 10 && reply.frame[2] == 0x05
+                    && (reply.frame[3] == 0x00 || reply.frame[3] == 0x01)
+                    && reply.frame[6] == command[2] && reply.frame[7] == command[3]) {
+                    Serial.printf("[AUTO BASE] UBX %02X/%02X: %s\n", command[2], command[3],
+                                  reply.frame[3] == 1 ? "ACK" : "NAK (chip tu choi lenh)");
+                    return reply.frame[3] == 1;
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+        Serial.printf("[AUTO BASE] UBX %02X/%02X: khong co %s tu chip\n", command[2], command[3], poll ? "readback" : "ACK");
+        return false;
+    };
+    for (const auto &command : GnssCmdBuilder::buildRoverCommand(GnssCmdBuilder::GnssSensorType::Ublox)) {
+        // Unsupported optional port keys must not block legacy CFG commands.
+        exchange(command, false);
+    }
+    const bool roverConfirmed = exchange({0xB5, 0x62, 0x06, 0x71, 0, 0, 0x77, 0x6B}, true);
+    xSemaphoreGive(gnssSerialMutex);
+    xSemaphoreGive(rtcmBufferMutex);
+    if (!roverConfirmed) {
+        Serial.println("[AUTO BASE][ERROR] Chua xac nhan chip o Rover; dung truoc khi ket noi caster");
+        return false;
+    }
+    const uint32_t waiting = millis();
+    while (millis() - waiting < 10000UL && !workflowCancelRequested_) {
+        const auto snapshot = getGnssTelemetrySnapshot();
+        if (snapshot.lastGgaMs != 0 && static_cast<int32_t>(snapshot.lastGgaMs - waiting) > 0) {
+            Serial.printf("[AUTO BASE] Rover da xac nhan, GGA UART: %s\n", snapshot.lastGga);
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    Serial.println("[AUTO BASE][ERROR] Chip o Rover nhung khong co GGA moi trong 10s");
+    return false;
 }
 
 bool BackendAgent::applyBaseCoordinates(const double latitude, const double longitude,
@@ -1308,12 +1405,12 @@ bool BackendAgent::applyBaseCoordinates(const double latitude, const double long
         return false;
     }
     if (sensorType_ != "Ublox" && sensorType_ != "Unicorecomm") return false;
-    UbxCmdBuilder::GnssOptions options;
+    GnssCmdBuilder::GnssOptions options;
     options.ports = {"UART1"};
-    return writeGnssCommands(UbxCmdBuilder::buildBaseFixedLlaCommand(
+    return writeGnssCommands(GnssCmdBuilder::buildBaseFixedLlaCommand(
         latitude, longitude, altitude, 0.01f,
-        sensorType_ == "Ublox" ? UbxCmdBuilder::GnssSensorType::Ublox
-                                : UbxCmdBuilder::GnssSensorType::Unicore,
+        sensorType_ == "Ublox" ? GnssCmdBuilder::GnssSensorType::Ublox
+                                : GnssCmdBuilder::GnssSensorType::Unicore,
         options));
 }
 
@@ -1365,6 +1462,8 @@ bool BackendAgent::runAutoBaseWorkflow(JsonObject payload) {
         setWorkflowProgress(
             success ? "completed" : (cancelled ? "stopped" : "failed"),
             success ? 4 : 2, 4, serialized);
+        Serial.printf("[AUTO BASE] KET QUA: %s; %s\n",
+                      success ? "THANH CONG" : (cancelled ? "DA DUNG" : "THAT BAI"), reason.c_str());
         saveStatePreferences();
     };
 
@@ -1588,6 +1687,7 @@ bool BackendAgent::runAutoBaseWorkflow(JsonObject payload) {
     baseConfig["altitude_reference"] = "ELLIPSOID";
     baseConfig["base_setup_method"] = "AUTO_CORS";
     baseConfig["auto_configured"] = true;
+    baseConfig["fixed_samples_only"] = true;
     baseConfig["itrf_vn2000_transform_applied"] = transformed;
     baseConfig["central_meridian_deg"] = centralMeridianDeg;
     baseConfig["k0"] = scale;
@@ -1614,6 +1714,7 @@ bool BackendAgent::runAutoBaseWorkflow(JsonObject payload) {
     completed["raw_itrf_coord"]["lon"] = rawLongitude;
     completed["raw_itrf_coord"]["alt"] = rawAltitude;
     completed["sample_count"] = latitudes.size();
+    completed["fixed_samples_only"] = true;
     completed["transform_applied"] = transformed;
     completed["configured_ntrip_restarted"] = transportRestored;
     completed["projection_source"] = requestedProvince.isEmpty() ? "lon_fallback" : "manual_province";
@@ -1624,6 +1725,8 @@ bool BackendAgent::runAutoBaseWorkflow(JsonObject payload) {
     String completedJson;
     serializeJson(completed, completedJson);
     setWorkflowProgress("completed", 4, 4, completedJson);
+    Serial.printf("[AUTO BASE] KET QUA: THANH CONG; samples=%u; lat=%.10f; lon=%.10f; alt=%.4f\n",
+                  static_cast<unsigned>(latitudes.size()), finalLatitude, finalLongitude, finalAltitude);
     saveStatePreferences();
     return true;
 }
@@ -1932,10 +2035,14 @@ String BackendAgent::buildStatusPayload() {
     doc["status_boot_id"] = statusBootId_;
     doc["status_sequence"] = statusSequence_;
     doc["rtk_fix_status"] = gnss.fixStatus;
+    doc["last_raw_gga"] = gnss.lastGga;
+    doc["last_gga_fix_status"] = gnss.fixStatus;
+    if (gnss.lastGgaMs != 0) doc["last_raw_gga_age"] = (nowMs - gnss.lastGgaMs) / 1000.0;
+    else doc["last_raw_gga_age"] = nullptr;
     doc["base_mode_active"] = baseConfig_ != "{}" && baseConfig_.length() > 2;
     doc["detected_chip_type"] = sensorType_;
     doc["detected_chip_port"] = "Serial1";
-    doc["detected_chip_baud"] = GNSS_BAUD;
+    doc["detected_chip_baud"] = Serial1.baudRate();
     doc["is_provisioned"] = provisioned_;
     doc["is_locked"] = stationLock_.all;
     doc["is_synced"] = true;
@@ -1947,6 +2054,22 @@ String BackendAgent::buildStatusPayload() {
     copyJsonObject(doc, "base_config", baseConfig_);
     copyJsonObject(doc, "service_config", serviceConfig_);
     copyJsonObject(doc, "auto_base_progress", autoBaseProgress_);
+    JsonObject progress = doc["auto_base_progress"].as<JsonObject>();
+    if (!progress.isNull() && progress.size() > 0) {
+        if (progress["phase"] == "completed" && !(progress["fixed_samples_only"] | false)) {
+            progress["phase"] = "unverified";
+            progress["reason"] = "Ket qua cu chua duoc xac nhan RTK Fixed; can chay lai Auto Base";
+        }
+        progress["last_raw_gga"] = gnss.lastGga;
+        progress["gga_fix_status"] = gnss.fixStatus;
+        progress["gga_age_seconds"] = doc["last_raw_gga_age"];
+        progress["rtcm_bytes"] = ntripRoverBytesReceived();
+        progress["rtcm_pkts"] = ntripRoverPacketsReceived();
+        JsonObject current = progress.createNestedObject("current_coord");
+        current["lat"] = gnss.latitude;
+        current["lon"] = gnss.longitude;
+        current["alt"] = gnss.altitude;
+    }
 
     JsonObject system = doc.createNestedObject("system_info");
     JsonObject cpu = system.createNestedObject("cpu");
@@ -1970,7 +2093,7 @@ String BackendAgent::buildStatusPayload() {
 
     JsonObject disk = system.createNestedObject("disk");
     const uint32_t flashTotal = ESP.getFlashChipSize();
-    const uint32_t flashUsed = ESP.getSketchSize();
+    const uint32_t flashUsed = firmwareSize_;
     const uint32_t flashFree = (flashTotal > flashUsed) ? (flashTotal - flashUsed) : 0;
     disk["type"] = "Flash";
     disk["total_bytes"] = flashTotal;
@@ -2130,6 +2253,7 @@ String BackendAgent::buildStatusPayload() {
 }
 
 void BackendAgent::publishStatus(bool force) {
+    if (serialNumber_.isEmpty()) return;
     if (statusDirty_) force = true;
     if (!force && millis() - lastStatusMs_ < BACKEND_STATUS_INTERVAL_MS) {
         return;
@@ -2140,7 +2264,13 @@ void BackendAgent::publishStatus(bool force) {
     ++statusSequence_;
     const String payload = buildStatusPayload();
     if (mqttConnected()) {
-        mqtt.publish(statusTopic().c_str(), payload.c_str(), true);
+        const bool sent = mqtt.publish(statusTopic().c_str(), payload.c_str(), true);
+        if (!sent || !statusPublishConfirmed_) {
+            Serial.printf("[BACKEND][MQTT] STATUS %s topic=%s bytes=%u\n",
+                          sent ? "SENT" : "FAILED", statusTopic().c_str(),
+                          static_cast<unsigned>(payload.length()));
+        }
+        statusPublishConfirmed_ = sent;
     }
     if (websocketConnected()) {
         DynamicJsonDocument message(STATUS_DOCUMENT_SIZE + 512);
@@ -2161,6 +2291,7 @@ String BackendAgent::lwtPayload() const {
 
 void BackendAgent::onMqttConnected() {
     mqttConnected_ = true;
+    statusPublishConfirmed_ = false;
     Serial.println("[BACKEND][MQTT] Kenh MQTT san sang nhan lenh.");
     publishStatus(true);
 }
@@ -2314,8 +2445,7 @@ void BackendAgent::loop() {
     drainDataQueues();
     evaluateControlPlaneFailover();
 
-    // If GNSS chip is not yet identified (e.g. user hasn't plugged it in yet at boot),
-    // retry probing Serial1 every 8 seconds until detected
+    // Retry an unidentified receiver every 8 seconds while no base workflow is running.
     if (sensorType_ == "UNKNOWN" || sensorType_.isEmpty()) {
         const uint32_t now = millis();
         if (now - lastChipProbeMs_ >= 8000UL && !workflowActive()) {
@@ -2443,8 +2573,7 @@ void BackendAgent::applyServiceStreamCommand(JsonObject payload) {
             service,
             prefix + "_stream_on_demand",
             jsonBool(service, "stream_on_demand", false));
-        // An explicit stop must not disable an Always-On server, matching the
-        // dashboard/backend stream-state helper.
+        // Ignore stop requests for servers configured to stream continuously.
         if (!active && !onDemand) return;
         service[(prefix + "_stream_active").c_str()] = active;
         if (active && mountpoint.length() > 0) {
@@ -2532,7 +2661,12 @@ bool BackendAgent::executeRawCommands(JsonArray commands, String &error, const S
             continue;
         }
         if (sensorType == "Unicorecomm") routeUnicoreOutput(decoded, length, GNSS_UNICORE_PORT);
-        else if (sensorType == "Ublox") UbxCmdBuilder::routeUbloxOutput(decoded, length);
+        else if (sensorType == "Ublox") GnssCmdBuilder::routeUbloxOutput(decoded, length);
+        const bool unicore = sensorType == "Unicorecomm" || (sensorType.isEmpty() && sensorType_ == "Unicorecomm");
+        if (unicore) {
+            if (!writeUnicoreCommand(decoded, length, error)) return false;
+            continue;
+        }
         if (rtcmBufferMutex && xSemaphoreTake(rtcmBufferMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
             Serial1.write(decoded, length);
             Serial1.flush();
@@ -2763,7 +2897,7 @@ void BackendAgent::handleCommand(const String &source, const String &message) {
     } else if (command == "CHECK_BASE_STATUS") {
         if (sensorType_ == "Ublox") {
             // UBX-CFG-TMODE3 poll (the stream reader owns incoming bytes).
-            const UbxCmdBuilder::Command poll = {0xB5, 0x62, 0x06, 0x71, 0x00, 0x00, 0x77, 0x6B};
+            const GnssCmdBuilder::Command poll = {0xB5, 0x62, 0x06, 0x71, 0x00, 0x00, 0x77, 0x6B};
             success = writeGnssCommands({poll});
             if (success) detail = "base status requested from GNSS";
             else error = "GNSS serial is busy";
