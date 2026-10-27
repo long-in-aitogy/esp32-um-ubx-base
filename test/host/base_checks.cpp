@@ -53,13 +53,6 @@ int main(int argc, char **argv) {
     assert(feedIdentity("0\",\"R4.10\"*12345678\r\n"));
     assert(!feedIdentity("#" + std::string(600, 'x') + "\r\n"));
     assert(feedIdentity("#versiona,97,GPS;\"UM982\"*12345678\r\n"));
-    assert(std::strcmp(unicoreSurveyState(5000, 4000, 1, 1, "BASE_FIXED"), "awaiting_gga") == 0);
-    assert(std::strcmp(unicoreSurveyState(5000, 0, 2, 1, "BASE_FIXED"), "awaiting_gga") == 0);
-    assert(std::strcmp(unicoreSurveyState(20000, 4000, 2, 1, "BASE_FIXED"), "awaiting_gga") == 0);
-    assert(std::strcmp(unicoreSurveyState(5000, 4000, 2, 1, "GPS_FIX"), "waiting_base") == 0);
-    assert(std::strcmp(unicoreSurveyState(5000, 4000, 2, 1, "RTK_FIXED"), "waiting_base") == 0);
-    assert(std::strcmp(unicoreSurveyState(5000, 4000, 2, 1, "BASE_FIXED"), "base_ready") == 0);
-    assert(std::strcmp(unicoreSurveyState(100, UINT32_MAX - 100, 0, UINT32_MAX, "BASE_FIXED"), "base_ready") == 0);
     const std::string umCommand = "mode rover\r\n";
     const auto umReply = [&]() {
         return UnicoreReply(reinterpret_cast<const uint8_t *>(umCommand.data()), umCommand.size());

@@ -8,10 +8,11 @@
 #include <cstring>
 #include <vector>
 
-using namespace BackendAgentInternal;
 #include "functions/Ubx_Reply.h"
 #include "functions/Unicore_Reply.h"
 #include <cstdio>
+
+using namespace BackendAgentInternal;
 
 extern SemaphoreHandle_t tcpStreamMutex;
 extern SemaphoreHandle_t rtcmBufferMutex;
@@ -153,9 +154,6 @@ bool BackendAgent::writeUnicoreCommand(const uint8_t *data, size_t length, Strin
             surveyInStartedMs_ = surveyInMonitoring_ ? millis() : 0;
             surveyInTargetSeconds_ = surveyInMonitoring_ ? target : 0;
             if (surveyInMonitoring_) surveyInResultPending_ = true;
-            surveyInBaselineGgaCount_ = getGnssTelemetrySnapshot().ggaCount;
-            lastSurveyGgaPollMs_ = 0;
-            lastSurveyLoggedState_ = "";
         }
         // A reset can ACK before the receiver actually reboots. Never retry it blindly.
         if (!std::strcmp(reply.key, "freset") || !std::strcmp(reply.key, "reset")) delay(2000);

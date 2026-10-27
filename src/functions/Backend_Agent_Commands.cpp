@@ -3,15 +3,14 @@
 #include "Prog_Config.h"
 #include "functions/NTRIP_Handler_IP.h"
 #include "functions/RTCM_Receiver.h"
-#include "functions/Base_Sample.h"
 #include <cmath>
 #include <cstring>
-#include <vector>
 
-using namespace BackendAgentInternal;
 #include "functions/MQTT_Manager.h"
 #include "functions/Unicore_Output.h"
 #include "functions/Unicore_Readback.h"
+
+using namespace BackendAgentInternal;
 
 extern SemaphoreHandle_t rtcmBufferMutex;
 

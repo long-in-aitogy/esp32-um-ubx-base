@@ -13,7 +13,7 @@
 class BackendAgentWebsocket;
 
 // Device agent for backend commands, status, provisioning and base workflows.
-// Receiver coordinates come from NMEA; RTCM payloads are not decoded here.
+// Receiver coordinates come from NMEA or Unicore readback; RTCM is forwarded.
 class BackendAgent {
 public:
     void begin();
@@ -97,9 +97,6 @@ private:
     bool surveyInMonitoring_ = false;
     uint32_t surveyInStartedMs_ = 0;
     uint32_t surveyInTargetSeconds_ = 0;
-    uint32_t surveyInBaselineGgaCount_ = 0;
-    uint32_t lastSurveyGgaPollMs_ = 0;
-    const char *lastSurveyLoggedState_ = "";
     String statusBootId_;
 
     QueueHandle_t nmeaQueue_ = nullptr;

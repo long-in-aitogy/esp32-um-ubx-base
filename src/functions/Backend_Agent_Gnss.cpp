@@ -1,12 +1,8 @@
 #include "functions/Backend_Agent.h"
 #include "Backend_Agent_Internal.h"
 #include "functions/Unicore_Readback.h"
-#include "functions/RTCM_Receiver.h"
-#include "Prog_Config.h"
-#include <cstring>
 
 using namespace BackendAgentInternal;
-extern SemaphoreHandle_t rtcmBufferMutex;
 
 bool BackendAgent::refreshReceiverReadback(String &error) {
     lastReceiverPollMs_ = millis();
@@ -25,9 +21,6 @@ bool BackendAgent::refreshReceiverReadback(String &error) {
                 surveyInMonitoring_ = true;
                 surveyInStartedMs_ = 0;
                 surveyInTargetSeconds_ = 0;
-                surveyInBaselineGgaCount_ = getGnssTelemetrySnapshot().ggaCount;
-                lastSurveyGgaPollMs_ = 0;
-                lastSurveyLoggedState_ = "";
             }
         } else {
             surveyInMonitoring_ = false;
