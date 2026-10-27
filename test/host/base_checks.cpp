@@ -5,6 +5,8 @@
 #include "functions/gnss_cmd_builder.h"
 #include "functions/Ubx_Reply.h"
 #include "functions/Unicore_Reply.h"
+#include "functions/Unicore_Identification.h"
+#include "functions/Unicore_Log.h"
 #include "functions/unicore_commands.h"
 #include <cassert>
 #include <iostream>
@@ -27,6 +29,37 @@ void checkPackets(const Command &bytes) {
 }
 
 int main(int argc, char **argv) {
+    const std::string modeLog = "#MODE,81,GPS,FINE,2230,547967000,0,0,18,518;MODE ROVER SURVEY,*1B";
+    assert(validUnicoreLogChecksum(modeLog.data(), modeLog.size()));
+    const std::string crcLog = "#BASEINFOA,56,GPS,FINE,2190,376748000,0,0,18,153;00000000,-2160493.199,4383620.763,4084734.120,\"0000\",0*2edbd87a";
+    assert(validUnicoreLogChecksum(crcLog.data(), crcLog.size()));
+    auto corruptLog = crcLog;
+    corruptLog[20] ^= 1;
+    assert(!validUnicoreLogChecksum(corruptLog.data(), corruptLog.size()));
+    assert(!validUnicoreLogChecksum(modeLog.data(), modeLog.size() - 1));
+    assert(!validUnicoreLogChecksum("#MODE;MODE BASE", 15));
+    assert(!validUnicoreLogChecksum(nullptr, 0));
+    UnicoreIdentification identity;
+    const auto feedIdentity = [&](const std::string &bytes) {
+        bool found = false;
+        for (unsigned char byte : bytes) found = identity.feed(byte) || found;
+        return found;
+    };
+    assert(!feedIdentity(std::string("\xD3\0\x17#noise\0", 11)));
+    assert(!feedIdentity("$command,versiona,response: OK\r\n"));
+    assert(!feedIdentity("#MODE,97,GPS;\"UM980\"\r\n"));
+    assert(!feedIdentity("#VERSIONA,97,GPS;\"OTHER\",\"VERSION\"*00\r\n"));
+    assert(!feedIdentity("#VERSIONA,97,GPS;\"UM98"));
+    assert(feedIdentity("0\",\"R4.10\"*12345678\r\n"));
+    assert(!feedIdentity("#" + std::string(600, 'x') + "\r\n"));
+    assert(feedIdentity("#versiona,97,GPS;\"UM982\"*12345678\r\n"));
+    assert(std::strcmp(unicoreSurveyState(5000, 4000, 1, 1, "BASE_FIXED"), "awaiting_gga") == 0);
+    assert(std::strcmp(unicoreSurveyState(5000, 0, 2, 1, "BASE_FIXED"), "awaiting_gga") == 0);
+    assert(std::strcmp(unicoreSurveyState(20000, 4000, 2, 1, "BASE_FIXED"), "awaiting_gga") == 0);
+    assert(std::strcmp(unicoreSurveyState(5000, 4000, 2, 1, "GPS_FIX"), "waiting_base") == 0);
+    assert(std::strcmp(unicoreSurveyState(5000, 4000, 2, 1, "RTK_FIXED"), "waiting_base") == 0);
+    assert(std::strcmp(unicoreSurveyState(5000, 4000, 2, 1, "BASE_FIXED"), "base_ready") == 0);
+    assert(std::strcmp(unicoreSurveyState(100, UINT32_MAX - 100, 0, UINT32_MAX, "BASE_FIXED"), "base_ready") == 0);
     const std::string umCommand = "mode rover\r\n";
     const auto umReply = [&]() {
         return UnicoreReply(reinterpret_cast<const uint8_t *>(umCommand.data()), umCommand.size());
@@ -83,6 +116,7 @@ int main(int argc, char **argv) {
     assert(!freshRtkSample(5000, 0, "RTK_FIXED"));
     assert(!freshRtkSample(5000, 1000, "RTK_FIXED"));
     assert(!freshRtkSample(5000, 4000, "GPS_FIX"));
+    assert(!freshRtkSample(5000, 4000, "BASE_FIXED"));
     assert(freshRtkSample(100, UINT32_MAX - 100, "RTK_FIXED"));
     StationLock lock;
     const int second[] = {2};
@@ -104,12 +138,23 @@ int main(int argc, char **argv) {
     std::string ascii = "rtcm1074 com3 1\r\n";
     routeUnicoreOutput(reinterpret_cast<uint8_t *>(&ascii[0]), ascii.size(), 2);
     assert(ascii == "rtcm1074 com2 1\r\n");
+    for (const auto &message : {"rtcm1006", "rtcm1077", "gpgga", "gpgst"}) {
+        for (const auto &port : {"COM1", "com2", "CoM3"}) {
+            std::string current = std::string(message) + " " + port + " 1\r\n";
+            const size_t length = routeUnicoreOutput(reinterpret_cast<uint8_t *>(current.data()), current.size(), 0);
+            current.resize(length);
+            assert(current == std::string(message) + " 1\r\n");
+        }
+    }
     std::string other = "config com3 115200\r\n";
     routeUnicoreOutput(reinterpret_cast<uint8_t *>(&other[0]), other.size(), 2);
+    assert(other == "config com3 115200\r\n");
+    assert(routeUnicoreOutput(reinterpret_cast<uint8_t *>(other.data()), other.size(), 0) == other.size());
     assert(other == "config com3 115200\r\n");
     for (size_t length = 0; length < ascii.size(); ++length) {
         auto shortened = ascii.substr(0, length);
         routeUnicoreOutput(reinterpret_cast<uint8_t *>(shortened.data()), length, 2);
+        routeUnicoreOutput(reinterpret_cast<uint8_t *>(shortened.data()), length, 0);
     }
     GnssOptions usb, uart;
     const auto ephemeris = UnicoreCommands::buildEphemerisOutputCommands("com2");
@@ -122,6 +167,14 @@ int main(int argc, char **argv) {
     assert(unicoreAllOutput.find("rtcm1006 COM2 1\r\n") != std::string::npos);
     assert(unicoreAllOutput.find("rtcm1044 COM2 1\r\n") != std::string::npos);
     assert(UnicoreCommands::buildBaseAllRtcmOutputCommand("COM9", true).empty());
+    const auto currentOutput = commandListToBytes(UnicoreCommands::buildBaseAllRtcmOutputCommand("CURRENT", true));
+    const std::string currentOutputText(currentOutput.begin(), currentOutput.end());
+    assert(currentOutputText.find("rtcm1006 1\r\n") != std::string::npos);
+    assert(currentOutputText.find("rtcm1044 1\r\n") != std::string::npos);
+    assert(currentOutputText.find("CURRENT") == std::string::npos);
+    assert(currentOutputText.find("COM") == std::string::npos);
+    const auto singleCurrent = commandListToBytes(UnicoreCommands::buildBaseRtcmOutputCommand("1006", "CURRENT", true));
+    assert(std::string(singleCurrent.begin(), singleCurrent.end()) == "rtcm1006 1\r\nsaveconfig\r\n");
     for (const auto &command : ephemeris) {
         UnicoreReply reply(command.data(), command.size());
         assert(reply.key[0]);
@@ -182,20 +235,21 @@ int main(int argc, char **argv) {
             const std::string output(text.begin(), text.end());
             assert(output.find("mode base 10.7500000000 106.5000000000 12.5000\r\n") != std::string::npos);
             assert(output.find("com3") == std::string::npos);
-            assert(output.find("gpgga com2 1\r\n") == std::string::npos);
-            assert(output.find("gpgsa com2 1\r\n") == std::string::npos);
-            assert(output.find("gpgsv com2 1\r\n") == std::string::npos);
-            assert(output.find("gpgst com2 1\r\n") == std::string::npos);
-            assert(output.find("rtcm1074 com2 1") != std::string::npos);
+            assert(output.find("gpgga 1\r\n") == std::string::npos);
+            assert(output.find("gpgsa 1\r\n") == std::string::npos);
+            assert(output.find("gpgsv 1\r\n") == std::string::npos);
+            assert(output.find("gpgst 1\r\n") == std::string::npos);
+            assert(output.find("rtcm1074 1") != std::string::npos);
+            assert(output.find("com2") == std::string::npos);
             for (const auto &commands : {survey, fixed}) {
                 const auto bytes = commandListToBytes(commands);
                 const std::string configured(bytes.begin(), bytes.end());
-                assert(configured.find("gpgga com2 1\r\n") == std::string::npos);
-                assert(configured.find("gpgsa com2 1\r\n") == std::string::npos);
-                assert(configured.find("gpgsv com2 1\r\n") == std::string::npos);
-                assert(configured.find("gpgst com2 1\r\n") == std::string::npos);
+                assert(configured.find("gpgga 1\r\n") == std::string::npos);
+                assert(configured.find("gpgsa 1\r\n") == std::string::npos);
+                assert(configured.find("gpgsv 1\r\n") == std::string::npos);
+                assert(configured.find("gpgst 1\r\n") == std::string::npos);
                 for (const char *id : {"1019", "1020", "1042", "1045"})
-                    assert(configured.find(std::string("rtcm") + id + " com2 1\r\n") != std::string::npos);
+                    assert(configured.find(std::string("rtcm") + id + " 1\r\n") != std::string::npos);
             }
         }
     }
@@ -205,13 +259,18 @@ int main(int argc, char **argv) {
         120, 10.0, GnssSensorType::Unicore, diagnostics);
     const auto diagnosticText = commandListToBytes(diagnosticSurvey);
     const std::string diagnosticOutput(diagnosticText.begin(), diagnosticText.end());
-    assert(diagnosticOutput.find("gpgga com2 1\r\n") != std::string::npos);
-    assert(diagnosticOutput.find("rtcm1074 com2 1\r\n") != std::string::npos);
+    assert(diagnosticOutput.find("config undulation 0.0\r\n") < diagnosticOutput.find("mode base time "));
+    assert(diagnosticOutput.find("gpgga 1\r\n") != std::string::npos);
+    assert(diagnosticOutput.find("rtcm1074 1\r\n") != std::string::npos);
 
-    auto output = buildUbloxOutputConfigCommand(usb);
-    routeUbloxOutput(output.data(), output.size());
-    checkPackets(output);
-    assert(output == buildUbloxOutputConfigCommand(uart));
+    for (const auto mode : {OutputMode::DiagnosticsRtcm, OutputMode::RtcmOnly}) {
+        usb.outputMode = mode;
+        uart.outputMode = mode;
+        auto output = buildUbloxOutputConfigCommand(usb);
+        routeUbloxOutput(output.data(), output.size());
+        checkPackets(output);
+        assert(output == buildUbloxOutputConfigCommand(uart));
+    }
 
     // Route hexadecimal packets from stdin and emit the resulting bytes for comparison.
     if (argc > 1) {
@@ -224,7 +283,7 @@ int main(int argc, char **argv) {
                 routeUbloxOutput(packet.data(), packet.size());
                 checkPackets(packet);
             } else {
-                routeUnicoreOutput(packet.data(), packet.size(), 2);
+                packet.resize(routeUnicoreOutput(packet.data(), packet.size(), 0));
             }
             for (uint8_t byte : packet) printf("%02x", byte);
             printf("\n");
