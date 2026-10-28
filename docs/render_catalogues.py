@@ -21,6 +21,10 @@ ACCENT = colors.HexColor("#087E8B")
 MUTED = colors.HexColor("#536678")
 WIDTH = A4[0] - 36 * mm
 
+DEJAVU_SANS = "DejaVuSans.ttf"
+DEJAVU_SANS_BOLD = "DejaVuSans-Bold.ttf"
+DEJAVU_SANS_OBLIQUE = "DejaVuSans-Oblique.ttf"
+DEJAVU_SANS_MONO = "DejaVuSansMono.ttf"
 
 def _resolve_asset(base, relative):
     """Resolve a catalogue asset without allowing it to escape its directory."""
@@ -33,11 +37,41 @@ def _resolve_asset(base, relative):
     return asset
 
 
+def _output_directory(value):
+    """Resolve an output directory without allowing writes outside the docs directory."""
+    directory = Path(value).resolve()
+    try:
+        directory.relative_to(ROOT)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Output directory must be inside {ROOT}: {value}"
+        ) from exc
+    return directory
+
+
+def _font_directory(value):
+    directory = Path(value).resolve()
+    if not directory.is_dir():
+        raise argparse.ArgumentTypeError(f"Font directory does not exist: {value}")
+    required = (
+        DEJAVU_SANS,
+        DEJAVU_SANS_BOLD,
+        DEJAVU_SANS_OBLIQUE,
+        DEJAVU_SANS_MONO,
+    )
+    missing = [name for name in required if not (directory / name).is_file()]
+    if missing:
+        raise argparse.ArgumentTypeError(
+            f"Font directory is missing required files: {', '.join(missing)}"
+        )
+    return directory
+
+
 def fonts(directory=None):
     if directory:
         base = Path(directory)
         paths = [base / name for name in (
-            "DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans-Oblique.ttf", "DejaVuSansMono.ttf")]
+            DEJAVU_SANS, DEJAVU_SANS_BOLD, DEJAVU_SANS_OBLIQUE, DEJAVU_SANS_MONO)]
     elif Path("/System/Library/Fonts/Supplemental/Arial.ttf").exists():
         base = Path("/System/Library/Fonts/Supplemental")
         paths = [base / "Arial.ttf", base / "Arial Bold.ttf", base / "Arial Italic.ttf",
@@ -45,7 +79,7 @@ def fonts(directory=None):
     else:
         base = Path("/usr/share/fonts/truetype/dejavu")
         paths = [base / name for name in (
-            "DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans-Oblique.ttf", "DejaVuSansMono.ttf")]
+            DEJAVU_SANS, DEJAVU_SANS_BOLD, DEJAVU_SANS_OBLIQUE, DEJAVU_SANS_MONO)]
     for name, path in zip(("Body", "BodyBold", "BodyItalic", "Mono"), paths):
         if not path.is_file():
             raise SystemExit(f"Missing font: {path}. Supply --font-dir with DejaVu fonts.")
@@ -217,8 +251,9 @@ def render(source, output):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--font-dir", help="Directory containing the four DejaVu TTF fonts")
-    parser.add_argument("--output-dir", type=Path, default=ROOT)
+    parser.add_argument("--font-dir", type=_font_directory,
+                        help="Directory containing the four DejaVu TTF fonts")
+    parser.add_argument("--output-dir", type=_output_directory, default=ROOT)
     args = parser.parse_args()
     fonts(args.font_dir)
     args.output_dir.mkdir(parents=True, exist_ok=True)
