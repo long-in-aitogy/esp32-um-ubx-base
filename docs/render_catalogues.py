@@ -38,34 +38,6 @@ def _resolve_asset(base, relative):
     return asset
 
 
-def _output_directory(value):
-    """Resolve an output directory without allowing writes outside the docs directory."""
-    return Path(safe_path(value))
-
-
-def _font_directory(value):
-    try:
-        directory = Path(safe_path(value))
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"Font directory must be inside {ROOT}: {value}"
-        ) from exc
-    if not directory.is_dir():
-        raise argparse.ArgumentTypeError(f"Font directory does not exist: {value}")
-    required = (
-        DEJAVU_SANS,
-        DEJAVU_SANS_BOLD,
-        DEJAVU_SANS_OBLIQUE,
-        DEJAVU_SANS_MONO,
-    )
-    missing = [name for name in required if not (directory / name).is_file()]
-    if missing:
-        raise argparse.ArgumentTypeError(
-            f"Font directory is missing required files: {', '.join(missing)}"
-        )
-    return directory
-
-
 def fonts(directory=None):
     if directory:
         base = Path(directory)
@@ -256,11 +228,13 @@ def safe_path(path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--font-dir", type=_font_directory,
-                        help="Directory containing the four DejaVu TTF fonts")
-    parser.add_argument("--output-dir", type=_output_directory, default=ROOT)
+    parser.add_argument("--font-dir", help="Directory containing the four DejaVu TTF fonts")
+    parser.add_argument("--output-dir", type=Path, default=ROOT)
     args = parser.parse_args()
-    fonts(args.font_dir)
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_dir = Path(safe_path(args.output_dir))
+    font_dir = safe_path(args.font_dir) if args.font_dir else None
+    fonts(font_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     for source in sorted(ROOT.glob("Catalogue-*.md")):
-        render(source, args.output_dir / source.with_suffix(".pdf").name)
+        render(source, output_dir / source.with_suffix(".pdf").name)
