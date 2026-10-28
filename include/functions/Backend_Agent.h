@@ -13,7 +13,7 @@
 class BackendAgentWebsocket;
 
 // Device agent for backend commands, status, provisioning and base workflows.
-// Receiver coordinates come from NMEA; RTCM payloads are not decoded here.
+// Receiver coordinates come from NMEA or Unicore readback; RTCM is forwarded.
 class BackendAgent {
 public:
     void begin();
@@ -61,6 +61,8 @@ private:
     String autoBaseProgress_ = "{}";
     String baseConfig_ = "{}";
     String serviceConfig_ = "{}";
+    String receiverBaseReadback_ = "{\"state\":\"not_read\",\"chip\":\"Unicorecomm\",\"mode_kind\":\"unknown\"}";
+    String surveyInResult_ = "{}";
     String licenseToken_;
     String sensorType_ = "UNKNOWN";
 
@@ -86,6 +88,15 @@ private:
     int32_t lastWebsocketAckSequence_ = -1;
     int32_t statusSequence_ = 0;
     int32_t failOpenEntrySequence_ = -1;
+    uint32_t receiverBaseReadbackMs_ = 0;
+    uint32_t receiverBaseReadbackRevision_ = 0;
+    uint32_t lastReceiverPollMs_ = 0;
+    bool surveyInResultPending_ = false;
+    bool surveyInReadbackReady_ = false;
+    bool surveyInReadbackHasPosition_ = false;
+    bool surveyInMonitoring_ = false;
+    uint32_t surveyInStartedMs_ = 0;
+    uint32_t surveyInTargetSeconds_ = 0;
     String statusBootId_;
 
     QueueHandle_t nmeaQueue_ = nullptr;
@@ -100,6 +111,7 @@ private:
     void ensureDefaultServiceConfig();
     String normalAgentState() const;
     void setupWebsocket();
+    void refreshWebsocket();
     void loopWebsocket();
     void drainDataQueues();
     void evaluateControlPlaneFailover();
@@ -117,6 +129,8 @@ private:
     int loopNtripRoverLocked();
     bool stopNtripRoverLocked();
     bool applyBaseCoordinates(double latitude, double longitude, double altitude);
+    bool refreshReceiverReadback(String &error);
+    void pollGnssStatus();
     bool transformToVn2000(double latitude, double longitude, double altitude,
                            double centralMeridianDeg, double scale,
                            double &localLatitude, double &localLongitude,

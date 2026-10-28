@@ -10,6 +10,7 @@ constexpr size_t MAX_NMEA_LENGTH = 512;
 constexpr size_t MAX_RTCM_FRAME_LENGTH = 1029; // 3-byte header + 1023 + CRC
 
 String nmeaBuffer;
+String pendingRtcmData;
 uint8_t rtcmFrame[MAX_RTCM_FRAME_LENGTH] = {};
 size_t rtcmLength = 0;
 size_t rtcmExpectedLength = 0;
@@ -69,6 +70,7 @@ void setFixStatus(char *target, size_t capacity, int quality) {
         case 2: status = "DGPS"; break;
         case 4: status = "RTK_FIXED"; break;
         case 5: status = "RTK_FLOAT"; break;
+        case 7: status = "BASE_FIXED"; break;
         default: status = "NO_FIX"; break;
     }
     strncpy(target, status, capacity - 1);
@@ -307,11 +309,12 @@ void consumeByte(uint8_t value, String &rtcmOutput) {
 
 } // namespace
 
-String receiveRtcmFromGnss() {
-    if (Serial1.available() <= 0) {
-        return String();
-    }
+void bufferGnssQueryByte(uint8_t value) {
+    noteInputBytes(1);
+    consumeByte(value, pendingRtcmData);
+}
 
+String receiveRtcmFromGnss() {
     String rtcmData;
     rtcmData.reserve(1024);
     uint8_t buffer[128] = {};
@@ -319,6 +322,11 @@ String receiveRtcmFromGnss() {
     if (gnssSerialMutex == nullptr ||
         !xSemaphoreTake(gnssSerialMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
         return rtcmData;
+    }
+
+    if (!pendingRtcmData.isEmpty()) {
+        rtcmData = pendingRtcmData;
+        pendingRtcmData = "";
     }
 
     while (Serial1.available() > 0) {
