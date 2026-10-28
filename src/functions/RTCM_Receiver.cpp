@@ -105,7 +105,7 @@ void parseNmeaSentence(const String &rawSentence) {
     }
     if (fieldCount == 0) return;
 
-    const size_t typeLength = strlen(fields[0]);
+    const size_t typeLength = strnlen(fields[0], sizeof(fields[0]));
     if (typeLength < 3) return;
     const char *type = fields[0] + typeLength - 3;
 
