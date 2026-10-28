@@ -3,6 +3,7 @@
 #include "HardwareSerial.h"
 #include "Prog_Config.h"
 #include "functions/Backend_Agent.h"
+#include <cstdio>
 
 namespace {
 
@@ -63,6 +64,8 @@ double nmeaCoordinate(const char *raw, const char *hemisphere) {
 }
 
 void setFixStatus(char *target, size_t capacity, int quality) {
+    if (!target || capacity == 0) return;
+
     const char *status = "UNKNOWN";
     switch (quality) {
         case 0: status = "NO_FIX"; break;
@@ -73,7 +76,7 @@ void setFixStatus(char *target, size_t capacity, int quality) {
         case 7: status = "BASE_FIXED"; break;
         default: status = "NO_FIX"; break;
     }
-    strncpy(target, status, capacity - 1);
+    snprintf(target, capacity, "%s", status);
     target[capacity - 1] = '\0';
 }
 
@@ -175,7 +178,7 @@ void parseNmeaSentence(const String &rawSentence) {
 
     if (updateFix) setFixStatus(telemetry.fixStatus, sizeof(telemetry.fixStatus), fixQuality);
     if (strcmp(type, "GGA") == 0) {
-        strncpy(telemetry.lastGga, sentence.c_str(), sizeof(telemetry.lastGga) - 1);
+        snprintf(telemetry.lastGga, sizeof(telemetry.lastGga), "%s", sentence.c_str());
         telemetry.lastGga[sizeof(telemetry.lastGga) - 1] = '\0';
         telemetry.lastGgaMs = millis();
     }
