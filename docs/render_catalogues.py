@@ -1,4 +1,5 @@
 """Render the four Markdown catalogues to PDF. Requires reportlab."""
+import os
 from pathlib import Path
 import argparse
 import html
@@ -39,16 +40,16 @@ def _resolve_asset(base, relative):
 
 def _output_directory(value):
     """Resolve an output directory without allowing writes outside the docs directory."""
-    try:
-        return safe_path(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"Output directory must be inside {ROOT}: {value}"
-        ) from exc
+    return Path(safe_path(value))
 
 
 def _font_directory(value):
-    directory = Path(value).resolve()
+    try:
+        directory = Path(safe_path(value))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Font directory must be inside {ROOT}: {value}"
+        ) from exc
     if not directory.is_dir():
         raise argparse.ArgumentTypeError(f"Font directory does not exist: {value}")
     required = (
@@ -246,14 +247,11 @@ def render(source, output):
     doc.build(story)
     print(output)
 
-def safe_path(path, base=ROOT):
-    """Resolve a path and ensure it stays within the supplied directory."""
-    resolved = Path(path).resolve()
-    base = Path(base).resolve()
-    try:
-        resolved.relative_to(base)
-    except ValueError as exc:
-        raise ValueError(f"path {path!r} is outside the allowed directory") from exc
+def safe_path(path):
+    resolved = os.path.realpath(path)
+    base_dir = os.path.realpath(os.getcwd())
+    if resolved != base_dir and not resolved.startswith(base_dir + os.sep):
+        raise ValueError(f"path {path!r} is outside the allowed directory")
     return resolved
 
 if __name__ == "__main__":
