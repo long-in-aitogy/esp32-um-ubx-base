@@ -39,14 +39,12 @@ def _resolve_asset(base, relative):
 
 def _output_directory(value):
     """Resolve an output directory without allowing writes outside the docs directory."""
-    directory = Path(value).resolve()
     try:
-        directory.relative_to(ROOT)
+        return safe_path(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(
             f"Output directory must be inside {ROOT}: {value}"
         ) from exc
-    return directory
 
 
 def _font_directory(value):
@@ -248,6 +246,15 @@ def render(source, output):
     doc.build(story)
     print(output)
 
+def safe_path(path, base=ROOT):
+    """Resolve a path and ensure it stays within the supplied directory."""
+    resolved = Path(path).resolve()
+    base = Path(base).resolve()
+    try:
+        resolved.relative_to(base)
+    except ValueError as exc:
+        raise ValueError(f"path {path!r} is outside the allowed directory") from exc
+    return resolved
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
