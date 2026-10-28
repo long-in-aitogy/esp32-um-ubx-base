@@ -8,12 +8,10 @@ TinyGsmClient testClient(modem);
 
 void setUp(void)
 {
-  // set stuff up here
 }
 
 void tearDown(void)
 {
-  // clean stuff up here
 }
 
 void test_startSIM() {
@@ -24,8 +22,7 @@ void test_startSIM() {
 
 void test_TCP_connection() {
     Serial.println("Testing TCP connection...");
-    // Here you would implement the logic to test the TCP connection
-    // For example, you might want to connect to a known server and check if the connection is successful
+    // Require a reachable TCP service at this test-network address and caster port.
     bool result = testClient.connect("192.168.102.111", NTRIP_CASTER_PORT);
     TEST_ASSERT_TRUE(result);
 }
@@ -36,7 +33,7 @@ void setup() {
     SerialAT.begin(115200, SERIAL_8N1, RX_TO_MODEM_TX, TX_TO_MODEM_RX);
     delay(2000);
 
-    // Initialize board hardware as done in production `main()`
+    // Configure the board LED as an output before running the modem tests.
     pinMode(LED_PIN, OUTPUT);
     delay(2000);
 

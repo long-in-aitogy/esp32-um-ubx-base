@@ -1,13 +1,20 @@
-# ESP32 GNSS Gateway (UM980 / UM982)
+# ESP32 GNSS Gateway (UM980 / UM982 / u-blox)
 
-Firmware dành cho vi điều khiển ESP32 (ví dụ board TDM2402) đóng vai trò làm Gateway kết nối với module GNSS định vị động học thời gian thực (RTK) như Unicore UM980 hoặc UM982. 
+Chế độ **base 4G di động** kết nối CORS: nhập tọa độ chính xác (`FIXED_LLA`), survey-in (`SURVEY_IN`), auto base (`AUTO_CORS`) và khóa trạm.
+
+* 📖 **Tài liệu hướng dẫn**: Xem [hướng dẫn kết nối và kiểm tra](docs/base-4g.md).
+* 📝 **Nhật ký thay đổi**: Xem [chi tiết các bản sửa đổi firmware ESP32](CHANGELOG.md).
+
+Loại GNSS được cấu hình từ CORS; cùng một firmware hỗ trợ cả module Unicore (UM980, UM982) và u-blox (ZED-F9P).
 
 ## Tính năng chính
-- **Giao tiếp GNSS**: Đọc dữ liệu NMEA (như `$GNGGA`, `$GPGGA`) từ module UM980/UM982 qua Serial.
-- **Phân tích dữ liệu**: Trích xuất các thông số tọa độ (Latitude, Longitude), số lượng vệ tinh, trạng thái RTK từ chuỗi NMEA và đóng gói thành định dạng JSON.
-- **MQTT Publisher**: Gửi dữ liệu vị trí JSON lên MQTT Broker để giám sát tọa độ theo thời gian thực.
-- **Giám sát trạng thái (Health Check)**: Định kỳ báo cáo các thông số như RAM trống, Uptime, cường độ tín hiệu WiFi, trạng thái MQTT/NTRIP và chất lượng dữ liệu GNSS.
-- **NTRIP Client over IP**: Kết nối đến NTRIP Caster qua mạng IP, nhận dữ liệu cải chính định vị (RTCM) và đẩy ngược lại cho module GNSS để đạt được độ chính xác RTK (mức cm). Hỗ trợ truyền lại chuỗi GGA cho Caster để xác thực.
+- **Chế độ Base 4G di động & Rover**: Hỗ trợ 3 chế độ thiết lập Base: nhập tọa độ cố định (`FIXED_LLA`), khảo sát tự do (`SURVEY_IN`), và tự động đo tọa độ chuẩn qua CORS tham chiếu (`AUTO_CORS`).
+- **Chuyển đổi mượt mà & Chống xung đột**: Tự động ngắt task Auto Base ngầm và nhả UART khi người dùng chuyển sang nạp tọa độ chính xác (`EXECUTE_RAW_COMMANDS`).
+- **Giao tiếp GNSS đa nền tảng**: Nhận diện và tự động định tuyến lệnh log COM (Unicore) hoặc chuyển sang UART1 kèm tính lại checksum Fletcher (u-blox).
+- **Giám sát tài nguyên phần cứng (Telemetry)**: Báo cáo dung lượng RAM Heap (Bytes, KB, MB, %) và bộ nhớ Flash Disk lên CORS Dashboard thời gian thực.
+- **NTRIP Client & Gửi GGA định kỳ**: Tự động gửi câu GGA tức thì khi kết nối và nhắc lại định kỳ 5 giây/lần lên Caster để duy trì kết nối VRS/Auto Base.
+- **Khóa trạm linh hoạt (Scoped Station Lock)**: Hỗ trợ khóa riêng lẻ từng server xuất RTCM (server 1 hoặc server 2) hoặc khóa toàn bộ thiết bị, lưu trạng thái an toàn trong Flash NVS.
+- **MQTT & WebSocket Song song**: Hỗ trợ giao tiếp 2 chiều với CORS Dashboard qua cả MQTT và WebSocket. Cổng WebSocket cấu hình linh hoạt qua NVS.
 
 ## Yêu cầu môi trường và thiết bị
 - Môi trường phát triển: PlatformIO IDE hoặc bất kỳ IDE nào hỗ trợ PlatformIO.
@@ -30,19 +37,19 @@ Firmware dành cho vi điều khiển ESP32 (ví dụ board TDM2402) đóng vai 
 
 ### Tổ chức thư mục:
 ```
-├── .pio/           # Thư mục do PlatformIO tạo ra chứa file biên dịch, 
+├── .pio/           # Thư mục do PlatformIO tạo ra chứa file biên dịch,
 |               thư viện đã cài, v.v. Không chỉnh sửa trực tiếp.
 |               thư mục này không xuất hiện trong repo vì đã được thêm vào .gitignore
-| 
+|
 ├── boards/
 |   └── heltec_wifi_lora_32_v4.json  # Cấu hình PlatformIO để biên dịch
 |                                     mã nguồn cho Heltec V4
 |                                     (đây là file tuỳ chỉnh do PlatformIO chưa
 |                                     duyệt cấu hình Heltec V4 chính thức)
-| 
+|
 ├──lib/                             # Thư viện riêng của dự án (hiện chưa cần thiết).
 |                                  Sẽ được biên dịch thành thư viện liên kết tĩnh
-| 
+|
 ├──include/                         # Header files chứa cấu hình, định nghĩa hằng số,
 |   |                                 khai báo biến, đối tượng và prototype của hàm.
 |   |                                 Ngoại trừ main không có header và một số header
@@ -52,7 +59,7 @@ Firmware dành cho vi điều khiển ESP32 (ví dụ board TDM2402) đóng vai 
 |   |
 |   ├── Top_Lvl_Config.h            # Cấu hình cấp cao trước khi biên dịch
 |   └── Prog_Config.h               # Cấu hình hoạt động của chương trình
-| 
+|
 ├──src/                             # Mã nguồn chính của chương trình.
 |    ├── main.cpp                       # Điểm vào chính của chương trình, chứa hàm setup() và loop()
 |    ├── helper.cpp                     # Các hàm phụ trợ để xử lý dữ liệu, kết nối, v.v.
@@ -66,14 +73,14 @@ Firmware dành cho vi điều khiển ESP32 (ví dụ board TDM2402) đóng vai 
 |
 ├──test/                            # Thư mục dành cho việc viết unit test
 |                                  và sử dụng PlatformIO Test Runner.
-| 
+|
 ├──variants/                        # Cấu hình biến thể phần cứng (ví dụ: Heltec V4, TDM2402)
 |   |                                được định nghĩa dưới dạng macro trong file header (.h)
 |   |
 |   └── heltec_V4
 |           |
 |           └── pins_arduino.h     # Định nghĩa chân GPIO cho board Heltec V4
-|     
+|
 └──platformio.ini                    # File cấu hình chính của PlatformIO, xác định board,
 ```
 
@@ -163,10 +170,14 @@ Các lệnh này cấu hình module GNSS ở chế độ base và được gửi
 
 | Cú pháp | Giải thích |
 | --- | --- |
-| `ATG GNSS BASE SURVEY_IN <thời_gian> <độ_chính_xác>` | Bật chế độ khảo sát vị trí base. `<thời_gian>` là thời gian khảo sát tối thiểu, tính bằng giây; `<độ_chính_xác>` là ngưỡng độ chính xác, tính bằng mét. Ví dụ: `ATG GNSS BASE SURVEY_IN 300 1.0`. |
+| `ATG GNSS ROVER` | Chuyển module GNSS sang chế độ rover và bật output GGA/GST cần thiết. |
+| `ATG GNSS BASE SURVEY_IN <thời_gian> <độ_chính_xác>` | Bật khảo sát vị trí base và chỉ xuất RTCM. `<thời_gian>` tính bằng giây; `<độ_chính_xác>` tính bằng mét. Ví dụ: `ATG GNSS BASE SURVEY_IN 300 1.0`. |
+| `ATG GNSS BASE SURVEY_IN <thời_gian> <độ_chính_xác> W_DIAG` | Bật khảo sát base và xuất cả RTCM lẫn các bản tin diagnostic NMEA. Ví dụ: `ATG GNSS BASE SURVEY_IN 300 1.0 W_DIAG`. |
 | `ATG GNSS BASE FIXED <vĩ_độ> <kinh_độ> <độ_cao> <độ_chính_xác>` | Cấu hình vị trí base cố định theo LLA. Vĩ độ và kinh độ ở đơn vị độ thập phân, độ cao và độ chính xác ở mét. Ví dụ: `ATG GNSS BASE FIXED 10.7769 106.7009 12.5 0.5`. |
 | `ATG GNSS BASE <RTCM_MSG_TYPE> <PORT> ON` | Bật loại bản tin RTCM trên cổng GNSS chỉ định. |
-| `ATG GNSS BASE <RTCM_MSG_TYPE> <PORT> OFF` | Tắt loại bản tin RTCM trên cổng GNSS chỉ định. Với Unicore dùng `COM1`, `COM2` hoặc `COM3`; với UBlox dùng `I2C`, `UART1`, `UART2`, `USB` hoặc `SPI`. Ví dụ: `ATG GNSS BASE 1074 UART2 OFF`. |
+| `ATG GNSS BASE <RTCM_MSG_TYPE> <PORT> OFF` | Tắt loại bản tin RTCM trên cổng GNSS chỉ định. Với Unicore dùng `CURRENT` (cổng nhận lệnh), `COM1`, `COM2` hoặc `COM3`; với UBlox dùng `I2C`, `UART1`, `UART2`, `USB` hoặc `SPI`. Ví dụ: `ATG GNSS BASE 1074 UART2 OFF`. |
+| `ATG GNSS BASE ALL <PORT> <ON/OFF>` | Bật hoặc tắt toàn bộ các bản tin RTCM được firmware hỗ trợ trên cổng chỉ định. |
+| `ATG GNSS BASE 1006 CURRENT ON` | Với Unicore, bật RTCM1006 mỗi giây trên cổng đang nối ESP32; không chạy lại Survey-In hay đổi tọa độ. |
 | `ATG GNSS SET CHIP <UBLOX/UNICORE>` | Chọn loại chip GNSS, lưu vào Preferences và khởi động lại ESP32 để áp dụng. |
 
 ### ESP
@@ -210,4 +221,4 @@ Các lệnh này cấu hình module GNSS ở chế độ base và được gửi
 | --- | --- |
 | `ATG CONFIG RESET` | Đánh dấu khôi phục cấu hình mặc định, sau đó khởi động lại ESP32. Lần khởi động kế tiếp sẽ xóa toàn bộ cấu hình đã lưu trong Preferences và nạp lại giá trị mặc định. |
 
-> Lưu ý: Firmware hiện không phản hồi trạng thái lệnh qua MQTT. Theo dõi Serial Monitor để kiểm tra log xử lý lệnh; riêng lệnh GNSS sẽ báo lỗi khi thiếu hoặc thừa tham số.
+> Lệnh JSON từ CORS phản hồi qua `last_command_result` trong gói status MQTT/WebSocket. Lệnh `ATG` cũ vẫn ghi kết quả lên Serial Monitor; lệnh GNSS báo lỗi khi thiếu hoặc thừa tham số.
