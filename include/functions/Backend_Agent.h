@@ -17,6 +17,7 @@ class BackendAgentWebsocket;
 class BackendAgent {
 public:
     void begin();
+    bool initializeBaseAtBoot(GnssCmdBuilder::GnssSensorType detected);
     void loop();
     bool detectGnssChip(Stream &gnssStream, bool force = false);
     bool applyRoverMode();
@@ -25,6 +26,7 @@ public:
 
     void onMqttConnected();
     void onMqttDisconnected();
+    void onNetworkChanged();
     void onMqttMessage(const char *topic, const uint8_t *payload, size_t length);
 
     void enqueueNmea(const uint8_t *data, size_t length);
@@ -39,6 +41,11 @@ public:
     bool isServerLocked(uint8_t serverId) const { return stationLock_.locked(serverId); }
     bool isProvisioned() const { return provisioned_; }
     bool licenseValid() const { return licenseValid_; }
+    bool baseStartupConfigured() const {
+        return baseStartupState_ == "fixed_restored" || baseStartupState_ == "survey_started"
+            || baseStartupState_ == "preserved"
+            || baseStartupState_ == "configured";
+    }
     bool mqttConnected() const;
     bool websocketConnected() const;
     bool controlPlaneFailOpen() const { return controlPlaneFailOpen_; }
@@ -63,6 +70,9 @@ private:
     String serviceConfig_ = "{}";
     String receiverBaseReadback_ = "{\"state\":\"not_read\",\"chip\":\"Unicorecomm\",\"mode_kind\":\"unknown\"}";
     String surveyInResult_ = "{}";
+    String baseStartupState_ = "pending";
+    String baseStartupError_;
+    bool baseStartupAttempted_ = false;
     String licenseToken_;
     String sensorType_ = "UNKNOWN";
 
@@ -130,6 +140,7 @@ private:
     bool stopNtripRoverLocked();
     bool applyBaseCoordinates(double latitude, double longitude, double altitude);
     bool refreshReceiverReadback(String &error);
+    void saveSurveyResult(JsonObjectConst bestPosition, const String &mode);
     void pollGnssStatus();
     bool transformToVn2000(double latitude, double longitude, double altitude,
                            double centralMeridianDeg, double scale,
@@ -167,5 +178,6 @@ bool backendDeviceLocked(uint8_t serverId = 0);
 bool backendControlPlaneFailOpen();
 bool backendDeviceProvisioned();
 bool backendLicenseValid();
+bool backendBaseStartupConfigured();
 
 #endif // BACKEND_AGENT_H

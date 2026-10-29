@@ -276,6 +276,7 @@ void BackendAgent::handleCommand(const String &source, const String &message) {
         }
     } else if (command == "UNLOCK_DEVICE") {
         stationLock_.restore(false, 0);
+        if (baseStartupState_ == "locked") baseStartupAttempted_ = false;
         setAgentState(normalAgentState());
         detail = "device unlocked";
     } else if (command == "PROVISION_DEVICE") {
@@ -410,6 +411,9 @@ void BackendAgent::handleCommand(const String &source, const String &message) {
         if (success) {
             if (configuringBase) {
                 sensorType_ = sensorType;
+                baseStartupState_ = "configured";
+                baseStartupError_ = "";
+                baseStartupAttempted_ = true;
                 autoBaseProgress_.clear();
                 lastReceiverPollMs_ = 0;
                 setAgentState(normalAgentState());
@@ -425,13 +429,7 @@ void BackendAgent::handleCommand(const String &source, const String &message) {
             }
         }
     } else if (command == "CHECK_BASE_STATUS") {
-        if (sensorType_ == "Ublox") {
-            // UBX-CFG-TMODE3 poll (the stream reader owns incoming bytes).
-            const GnssCmdBuilder::Command poll = {0xB5, 0x62, 0x06, 0x71, 0x00, 0x00, 0x77, 0x6B};
-            success = writeGnssCommands({poll});
-            if (success) detail = "base status requested from GNSS";
-            else error = "GNSS serial is busy";
-        } else if (sensorType_ == "Unicorecomm") {
+        if (sensorType_ == "Unicorecomm" || sensorType_ == "Ublox") {
             success = refreshReceiverReadback(error);
             if (success) detail = "receiver mode and position read back";
         } else {

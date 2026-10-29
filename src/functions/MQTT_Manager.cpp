@@ -3,6 +3,7 @@
 #include "Prog_Config.h"
 #include "functions/Backend_Agent.h"
 #include "functions/cmd_handler.h"
+#include "functions/MqttWrite.h"
 #include <Preferences.h>
 #include <cstring>
 #include "helper.h"
@@ -17,7 +18,27 @@ namespace {
 
 extern TinyGsm modem;
 namespace {
-  TinyGsmClient gsmMqttClient(modem, 1);
+  class MqttGsmClient : public TinyGsmClient {
+   public:
+    using TinyGsmClient::TinyGsmClient;
+    using TinyGsmClient::write;
+
+    size_t write(const uint8_t* data, size_t size) override {
+      const size_t sent = writeMqttChunks(data, size, [this](const uint8_t* part, size_t count) {
+        return TinyGsmClient::write(part, count);
+      });
+      if (sent != size) {
+        Serial.printf("[MQTT][ERROR] Modem short write: %u/%u bytes; reconnect required\n",
+                      static_cast<unsigned>(sent), static_cast<unsigned>(size));
+        // The broker may have received a packet prefix. Discard this TCP stream
+        // so the next CONNECT starts a fresh MQTT frame boundary.
+        TinyGsmClient::stop();
+      }
+      return sent;
+    }
+  };
+
+  MqttGsmClient gsmMqttClient(modem, 1);
 }
 PubSubClient mqtt(wifiMqttClient);
 
@@ -73,7 +94,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
 int setupMQTT() {
   mqtt.setClient(activeMqttClient());
-  mqtt.setBufferSize(16384);
+  if (!mqtt.setBufferSize(16384)) {
+    Serial.println("[MQTT][ERROR] Cannot allocate 16384-byte MQTT buffer");
+    return -1;
+  }
   prefs.begin("myPrefs", false);
   mqttServerHost() = prefs.getString("MQTT_SERVER", String(MQTT_SERVER));
   if (mqttServerHost().equalsIgnoreCase("aitogy.asia")) {

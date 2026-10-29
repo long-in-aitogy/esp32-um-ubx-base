@@ -13,7 +13,6 @@ Preferences prefs;
 extern PubSubClient mqtt;
 
 namespace {
-    constexpr uint8_t CONNECTION_FAIL_LIMIT = 5;
     constexpr uint32_t GNSS_DATA_TIMEOUT_MS = 5000;
 
     // The MQTT task also runs WebSocket and JSON command handling, so it
@@ -44,6 +43,8 @@ SemaphoreHandle_t gnssSerialMutex = nullptr;
 void initPrefs();
 static void serviceMqtt(const bool reconnect);
 static void settleModemBeforeNtrip();
+static bool tryWifiFallback(bool protocolsRunning);
+static void checkSimInternetFallback();
 
 __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter);
 __attribute__((noreturn)) void healthCheckTask([[maybe_unused]] void *parameter);
@@ -103,25 +104,30 @@ void setup() {
     prefs.putString("GNSS_MDL_TYPE", detectedSensorTypeName);
     prefs.end();
 
-    if (needReset) {
-        if (detectedSensorType == GnssCmdBuilder::GnssSensorType::Unicore) {
-            Serial.println("[SETUP] Cau hinh UM980 lan dau tien...");
-            bootstrapUM980();
-        }
-        else if (detectedSensorType == GnssCmdBuilder::GnssSensorType::Ublox) {
-            Serial.println("[SETUP] Cau hinh u-blox lan dau tien...");
-            bootstrapUblox();
-        }
-        else {
-            Serial.println("[SETUP][ERROR] Chip GNSS khong hop le, bo qua cau hinh.");
-        }
-        if (detectedSensorType != GnssCmdBuilder::GnssSensorType::Invalid) {
-            Serial.println("[SETUP] Da cau hinh lai tat ca ve mac dinh, khoi dong de ap dung cau hinh.");
-            ESP.restart(); // Khởi động lại để áp dụng cấu hình mới
-        }
-    } else {
-        Serial.println("[SETUP] Da nhan dien chip GNSS: " + String(detectedSensorTypeName));
+    Serial.println("[SETUP] Da nhan dien chip GNSS: " + String(detectedSensorTypeName));
+
+    rtcmBufferMutex = xSemaphoreCreateMutex();
+    while (rtcmBufferMutex == nullptr) {
+        Serial.println("[ERROR] Tao mutex rtcmDataMutex that bai! Dang thu lai...");
+        rtcmBufferMutex = xSemaphoreCreateMutex();
     }
+    Serial.println("[SETUP] Tao mutex rtcmDataMutex thanh cong!");
+
+    tcpStreamMutex = xSemaphoreCreateMutex();
+    while (tcpStreamMutex == nullptr) {
+        Serial.println("[ERROR] Tao mutex tcpStreamMutex that bai! Dang thu lai...");
+        tcpStreamMutex = xSemaphoreCreateMutex();
+    }
+    Serial.println("[SETUP] Tao mutex tcpStreamMutex thanh cong!");
+
+    gnssSerialMutex = xSemaphoreCreateMutex();
+    while (gnssSerialMutex == nullptr) {
+        Serial.println("[ERROR] Tao mutex gnssSerialMutex that bai! Dang thu lai...");
+        gnssSerialMutex = xSemaphoreCreateMutex();
+    }
+    Serial.println("[SETUP] Tao mutex gnssSerialMutex thanh cong!");
+
+    backendAgent.initializeBaseAtBoot(detectedSensorType);
 
     // Keep the local console responsive even if Wi-Fi/GSM cannot connect.
     Serial.println("[SETUP] Starting Serial Command task before network setup.");
@@ -144,7 +150,8 @@ void setup() {
         } else {
             Serial.println("[SETUP] Su dung ket noi SIM/GSM");
             DeviceRuntime::gsmDisconnectCount = 0;
-            networkConnected = startSIM() && connectGSM();
+            networkConnected = startSIM() && connectGSM(1);
+            if (!networkConnected) networkConnected = tryWifiFallback(false);
         }
         if (networkConnected) {
             Serial.println("[SETUP] Ket noi mang thanh cong!");
@@ -163,27 +170,6 @@ void setup() {
 
     Serial.println("[SETUP] Ket noi mang thanh cong!");
     configTime(0, 0, "pool.ntp.org", "time.google.com");
-
-    rtcmBufferMutex = xSemaphoreCreateMutex();
-    while (rtcmBufferMutex == nullptr) {
-        Serial.println("[ERROR] Tao mutex rtcmDataMutex that bai! Dang thu lai...");
-        rtcmBufferMutex = xSemaphoreCreateMutex();
-    }
-    Serial.println("[SETUP] Tao mutex rtcmDataMutex thanh cong!");
-
-    tcpStreamMutex = xSemaphoreCreateMutex();
-    while (tcpStreamMutex == nullptr) {
-        Serial.println("[ERROR] Tao mutex tcpStreamMutex that bai! Dang thu lai...");
-        tcpStreamMutex = xSemaphoreCreateMutex();
-    }
-    Serial.println("[SETUP] Tao mutex tcpStreamMutex thanh cong!");
-
-    gnssSerialMutex = xSemaphoreCreateMutex();
-    while (gnssSerialMutex == nullptr) {
-        Serial.println("[ERROR] Tao mutex gnssSerialMutex that bai! Dang thu lai...");
-        gnssSerialMutex = xSemaphoreCreateMutex();
-    }
-    Serial.println("[SETUP] Tao mutex gnssSerialMutex thanh cong!");
 
     Serial.println("[SETUP] Task MQTT: Quan ly ket noi MQTT va callback.");
     xTaskCreatePinnedToCore(taskMQTT, "MQTT Task", MQTT_TASK_STACK_BYTES, nullptr, 3, nullptr, 1);
@@ -222,17 +208,15 @@ __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter) {
         }
 
         if (isGsmConnection()) {
-            bool gprsConnected = false;
-            if (xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
-                gprsConnected = modem.isGprsConnected();
-                xSemaphoreGive(tcpStreamMutex);
+            if (!xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
+                vTaskDelay(pdMS_TO_TICKS(100));
+                continue;
             }
+            const bool gprsConnected = modem.isGprsConnected();
+            xSemaphoreGive(tcpStreamMutex);
             if (!gprsConnected) {
-                if (++DeviceRuntime::gsmDisconnectCount >= CONNECTION_FAIL_LIMIT) {
-                    Serial.println("[GSM TASK][ERROR] GPRS mat ket noi qua 5 lan, khoi dong lai ESP32...");
-                    shutdownTcpTransportBeforeRestart();
-                    ESP.restart();
-                }
+                // The network manager retries SIM or switches to Wi-Fi. Keep
+                // GNSS and the local console alive while connectivity recovers.
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 continue;
             }
@@ -242,17 +226,8 @@ __attribute__((noreturn)) void taskNtrip([[maybe_unused]] void *parameter) {
             // loopNTRIP owns reconnect attempts and the per-endpoint backoff.
             loopStatus = loopNTRIP(rtcmRead);
             xSemaphoreGive(tcpStreamMutex);
-            ++DeviceRuntime::ntripDisconnectCount;
-            if (
-                (loopStatus == 500 || loopStatus == 504 || !isNtripConnected())
-                && DeviceRuntime::ntripDisconnectCount >= CONNECTION_FAIL_LIMIT
-            ) {
-                    Serial.println("[NTRIP TASK][ERROR] NTRIP mat ket noi qua 5 lan, khoi dong lai ESP32...");
-                    shutdownTcpTransportBeforeRestart();
-                    ESP.restart();
-            } else {
-                DeviceRuntime::ntripDisconnectCount = 0;
-            }
+            // A caster rejection is not a hardware failure. loopNTRIP keeps
+            // its per-endpoint reconnect backoff while MQTT remains available.
             #if PROGRAM_DEBUG
             Serial.println("[NTRIP TASK] loopNTRIP() tra ve: " + String(loopStatus));
             #endif
@@ -294,7 +269,9 @@ __attribute__((noreturn)) void taskMQTT([[maybe_unused]] void *parameter) {
     Serial.println("[MQTT TASK] Bat dau task MQTT...");
     while (true) {
         if (tcpStreamMutex && xSemaphoreTake(tcpStreamMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS))) {
+            checkSimInternetFallback();
             serviceMqtt(true);
+            checkSimInternetFallback();
             backendAgent.loop();
             xSemaphoreGive(tcpStreamMutex);
         }
@@ -319,7 +296,9 @@ void loop() {
 #if RTCM_COMMUNICATION_PROTOCOL == TCP_IP
             stopNtrip();
 #endif
-            if (connectGSM()) {
+            if (tryWifiFallback(true)) {
+                DeviceRuntime::gsmDisconnectCount = 0;
+            } else if (connectGSM(1)) {
                 DeviceRuntime::gsmDisconnectCount = 0;
 #if RTCM_COMMUNICATION_PROTOCOL == TCP_IP
                 setupNTRIP();
@@ -331,6 +310,7 @@ void loop() {
         } else {
             DeviceRuntime::gsmDisconnectCount = 0;
             digitalWrite(LED_PIN, LOW);
+            checkSimInternetFallback();
         }
         xSemaphoreGive(tcpStreamMutex);
     }
@@ -341,6 +321,59 @@ void loop() {
         digitalWrite(LED_PIN, LOW);
     }
     vTaskDelay(pdMS_TO_TICKS(1000));
+}
+
+// Called with the shared modem mutex held once worker tasks are running.
+static bool tryWifiFallback(bool protocolsRunning) {
+    Serial.println("[NETWORK] SIM khong truy cap duoc dich vu; thu Wi-Fi du phong da luu.");
+    if (!setupWiFi()) return false;
+    // Check the actual broker destination over Wi-Fi, not a public probe IP.
+    prefs.begin("myPrefs", true);
+    String host = prefs.getString("MQTT_SERVER", String(MQTT_SERVER));
+    if (host.equalsIgnoreCase("aitogy.asia")) host = MQTT_SERVER;
+    const uint16_t port = prefs.getUShort("MQTT_PORT", MQTT_PORT);
+    prefs.end();
+    WiFiClient probe;
+    const bool reachable = probe.connect(host.c_str(), port, 3000);
+    probe.stop();
+    if (!reachable) {
+        Serial.println("[NETWORK] Wi-Fi chua truy cap duoc MQTT broker; giu SIM va se thu lai.");
+        WiFi.disconnect();
+        return false;
+    }
+    if (protocolsRunning) {
+        mqtt.disconnect();
+        stopNtrip(); // Close the GSM sockets before changing client selection.
+    }
+    connectionType = ConnectionType::WIFI;
+    backendAgent.onNetworkChanged();
+    if (protocolsRunning) {
+        setupMQTT();
+        setupNTRIP();
+        connectNTRIP();
+    }
+    Serial.println("[NETWORK] Da chuyen sang Wi-Fi du phong; giu nguyen tuy chon SIM da luu.");
+    return true;
+}
+
+static void checkSimInternetFallback() {
+    static uint32_t unavailableSinceMs = 0;
+    static uint32_t lastWifiAttemptMs = 0;
+    if (!isGsmConnection()) return;
+    if (mqtt.connected() || isNtripConnected()) {
+        unavailableSinceMs = 0;
+        return;
+    }
+    const uint32_t now = millis();
+    if (unavailableSinceMs == 0) {
+        unavailableSinceMs = now ? now : 1;
+        Serial.println("[NETWORK] GPRS co the van ket noi nhung MQTT/NTRIP chua truy cap duoc; se thu Wi-Fi sau 30s.");
+        return;
+    }
+    if (now - unavailableSinceMs < 30000UL) return;
+    if (lastWifiAttemptMs != 0 && now - lastWifiAttemptMs < 30000UL) return;
+    lastWifiAttemptMs = now;
+    if (tryWifiFallback(true)) unavailableSinceMs = 0;
 }
 
 static void settleModemBeforeNtrip() {
