@@ -12,8 +12,6 @@ Firmware version remains V2.3.5.
 
 ```sh
 pio run -e tdm240x_dev_general
-python3 test/host/check_network_fallback.py
-python3 test/host/check_base_startup.py
 c++ -std=c++17 -fsanitize=address,undefined -g -Itest/host -Iinclude \
   test/host/base_checks.cpp src/functions/gnss_cmd_builder.cpp \
   src/functions/ublox_commands.cpp src/functions/unicore_commands.cpp \
