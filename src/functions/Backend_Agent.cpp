@@ -704,6 +704,12 @@ void BackendAgent::onMqttConnected() {
     publishStatus(true);
 }
 
+void BackendAgent::onNetworkChanged() {
+    onMqttDisconnected();
+    statusDirty_ = true;
+    refreshWebsocket();
+}
+
 void BackendAgent::onMqttDisconnected() {
     mqttConnected_ = false;
 }
@@ -874,6 +880,9 @@ void BackendAgent::loop() {
         }
     }
 
+    if (!baseStartupAttempted_ && sensorType_ != "UNKNOWN" && !sensorType_.isEmpty())
+        initializeBaseAtBoot(GnssCmdBuilder::sensorTypeFromString(sensorType_));
+
     pollGnssStatus();
     publishStatus(false);
 }
@@ -935,3 +944,4 @@ bool backendDeviceLocked(uint8_t serverId) { return serverId == 0 ? backendAgent
 bool backendControlPlaneFailOpen() { return backendAgent.controlPlaneFailOpen(); }
 bool backendDeviceProvisioned() { return backendAgent.isProvisioned(); }
 bool backendLicenseValid() { return backendAgent.licenseValid(); }
+bool backendBaseStartupConfigured() { return backendAgent.baseStartupConfigured(); }
