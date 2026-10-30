@@ -1,14 +1,14 @@
-#include "functions/Backend_Agent.h"
-#include "Backend_Agent_Internal.h"
+#include "functions/backend/Backend_Agent.h"
+#include "functions/backend/Backend_Agent_Internal.h"
 #include "Prog_Config.h"
-#include "functions/NTRIP_Handler_IP.h"
-#include "functions/RTCM_Receiver.h"
+#include "functions/ntrip/NTRIP_Handler_IP.h"
+#include "functions/ntrip/RTCM_Receiver.h"
 #include <cmath>
 #include <cstring>
 
-#include "functions/MQTT_Manager.h"
-#include "functions/Unicore_Output.h"
-#include "functions/Unicore_Readback.h"
+#include "functions/mqtt/MQTT_Manager.h"
+#include "functions/gnss/Unicore_Log.h"
+#include "functions/gnss/Unicore_Readback.h"
 
 using namespace BackendAgentInternal;
 

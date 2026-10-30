@@ -3,8 +3,8 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include "functions/Station_Lock.h"
-#include "functions/gnss_cmd_builder.h"
+#include "functions/backend/Station_Lock.h"
+#include "functions/gnss/gnss_cmd_builder.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
@@ -118,6 +118,10 @@ private:
 
     void loadPreferences();
     bool saveStatePreferences();
+    void saveDetectedChip(const char *chipType);
+    bool probeUnicore(Stream &stream, String &identityLine);
+    bool probeUblox(Stream &stream);
+    bool probePassiveUblox(Stream &stream);
     void ensureDefaultServiceConfig();
     String normalAgentState() const;
     void setupWebsocket();
