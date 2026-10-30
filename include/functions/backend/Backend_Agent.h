@@ -176,6 +176,7 @@ private:
     void handleWebsocketText(const String &message);
     void handleCommand(const String &source, const String &message);
     void handleControlAck(const String &source, const String &message, bool retained);
+    bool applyLockCommand(JsonObjectConst payload, String &error);
     void recordCommandResult(const String &command, const String &source,
                              const String &status, const String &detail,
                              const String &commandId);
