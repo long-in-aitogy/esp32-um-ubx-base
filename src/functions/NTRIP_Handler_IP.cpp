@@ -296,7 +296,7 @@ void loadEndpoints() {
 
 bool streamActive(uint8_t index) {
     if (index >= NTRIP_SERVER_COUNT || backendDeviceLocked(index + 1)
-        || !backendLicenseValid() || !backendDeviceProvisioned()) return false;
+        || !backendLicenseValid() || !backendDeviceProvisioned() || !backendBaseStartupConfigured()) return false;
     DynamicJsonDocument serviceDoc(CONFIG_DOCUMENT_SIZE);
     if (deserializeJson(serviceDoc, backendAgent.serviceConfigJson()) != DeserializationError::Ok
         || !serviceDoc.is<JsonObject>()) {

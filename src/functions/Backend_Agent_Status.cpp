@@ -103,6 +103,9 @@ String BackendAgent::buildStatusPayload() {
     }
 
     JsonObject system = doc.createNestedObject("system_info");
+    JsonObject startup = system.createNestedObject("base_startup");
+    startup["state"] = baseStartupState_;
+    if (!baseStartupError_.isEmpty()) startup["error"] = baseStartupError_;
     if (surveyInResult_.length() > 2) {
         DynamicJsonDocument savedSurvey(1024);
         if (deserializeJson(savedSurvey, surveyInResult_) == DeserializationError::Ok)
@@ -120,7 +123,7 @@ String BackendAgent::buildStatusPayload() {
         else survey["elapsed_since_ack_seconds"] = nullptr;
         survey["target_seconds"] = surveyInTargetSeconds_;
         survey["fix_status"] = surveyInReadbackReady_ ? "FIXEDPOS" : "UNVERIFIED";
-        survey["source"] = "BESTNAV";
+        survey["source"] = sensorType_ == "Ublox" ? "NAV-SVIN" : "BESTNAV";
         survey["readback_age_seconds"] = receiverBaseReadbackMs_ > 0
             ? static_cast<uint32_t>(nowMs - receiverBaseReadbackMs_) / 1000UL : UINT32_MAX;
     }
@@ -130,6 +133,12 @@ String BackendAgent::buildStatusPayload() {
             && readbackDoc.is<JsonObject>()) {
             JsonObject readback = system.createNestedObject("receiver_base_readback");
             readback.set(readbackDoc.as<JsonObjectConst>());
+            if (surveyInMonitoring_ && sensorType_ == "Ublox" && readbackDoc["state"] == "ok") {
+                survey["elapsed_seconds"] = readbackDoc["elapsed_seconds"];
+                survey["observations"] = readbackDoc["observations"];
+                survey["mean_accuracy_m"] = readbackDoc["mean_accuracy_m"];
+                survey["active"] = readbackDoc["active"];
+            }
             readback["age_seconds"] = receiverBaseReadbackMs_ > 0
                 ? static_cast<uint32_t>(millis() - receiverBaseReadbackMs_) / 1000UL
                 : 0;

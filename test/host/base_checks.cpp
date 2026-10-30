@@ -8,6 +8,7 @@
 #include "functions/Unicore_Identification.h"
 #include "functions/Unicore_Log.h"
 #include "functions/unicore_commands.h"
+#include "functions/Ubx_Base_Status.h"
 #include <cassert>
 #include <iostream>
 #include <string>
@@ -29,6 +30,36 @@ void checkPackets(const Command &bytes) {
 }
 
 int main(int argc, char **argv) {
+    uint8_t svin[40] = {};
+    const auto put32 = [](uint8_t *p, uint32_t value) {
+        for (int i = 0; i < 4; ++i) p[i] = value >> (8*i);
+    };
+    put32(svin+8, 120); put32(svin+28, 50000); put32(svin+32, 95);
+    put32(svin+12, uint32_t(-161974355)); put32(svin+16, 572912270); put32(svin+20, 228017820);
+    svin[24] = uint8_t(-75); svin[25] = 7; svin[26] = 74;
+    UbxBaseStatus baseStatus; baseStatus.mode = 1;
+    svin[37] = 1;
+    assert(baseStatus.svin(svin,40) && baseStatus.active && baseStatus.hasPosition);
+    assert(baseStatus.duration == 120 && baseStatus.observations == 95 && baseStatus.accuracy == 5);
+    svin[36] = 1; // Even a valid position is not final while the survey is active.
+    assert(baseStatus.svin(svin,40) && baseStatus.hasPosition && baseStatus.active);
+    svin[37] = 0;
+    assert(baseStatus.svin(svin,40) && baseStatus.valid && baseStatus.hasPosition);
+    assert(std::abs(baseStatus.latitude-21.08498763643) < 1e-10);
+    assert(std::abs(baseStatus.longitude-105.7867141884) < 1e-10);
+    assert(std::abs(baseStatus.height-2.9192763) < 1e-6);
+    svin[24] = 100;
+    assert(!baseStatus.svin(svin,40));
+    assert(!baseStatus.svin(svin,39));
+    uint8_t tmode[40] = {}; tmode[2] = 2; tmode[3] = 1;
+    put32(tmode+4, 210849876); put32(tmode+8, 1057867141); put32(tmode+12, 291);
+    tmode[16] = 12; tmode[17] = 88; tmode[18] = 94;
+    assert(baseStatus.tmode(tmode,40) && baseStatus.mode == 2 && baseStatus.hasPosition);
+    assert(std::abs(baseStatus.latitude-21.084987612) < 1e-11);
+    assert(std::abs(baseStatus.longitude-105.786714188) < 1e-11);
+    assert(std::abs(baseStatus.height-2.9194) < 1e-10);
+    assert(!baseStatus.ecef(0,0,0));
+    assert(baseStatus.ecef(6378137,0,0) && std::abs(baseStatus.height) < 1e-8);
     const std::string modeLog = "#MODE,81,GPS,FINE,2230,547967000,0,0,18,518;MODE ROVER SURVEY,*1B";
     assert(validUnicoreLogChecksum(modeLog.data(), modeLog.size()));
     const std::string crcLog = "#BASEINFOA,56,GPS,FINE,2190,376748000,0,0,18,153;00000000,-2160493.199,4383620.763,4084734.120,\"0000\",0*2edbd87a";
