@@ -146,6 +146,8 @@ private:
     bool refreshReceiverReadback(String &error);
     bool refreshUbloxReadback(String &error);
     bool refreshUnicoreReadback(String &error);
+    bool prepareStartupConfig(DynamicJsonDocument &config, JsonObject &base,
+                              bool &saved, String &method, String &error);
     bool readStartupReceiverMode(GnssCmdBuilder::GnssSensorType detected, String &error);
     bool buildStartupCommands(JsonObject base, GnssCmdBuilder::GnssSensorType detected,
                               bool restoreFixed, GnssCmdBuilder::CommandList &commands,

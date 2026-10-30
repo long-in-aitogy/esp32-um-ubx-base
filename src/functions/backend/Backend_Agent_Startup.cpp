@@ -34,6 +34,33 @@ bool BackendAgent::readStartupReceiverMode(GnssCmdBuilder::GnssSensorType detect
     return UbloxReadback::readBaseStatus(status, error);
 }
 
+bool BackendAgent::prepareStartupConfig(DynamicJsonDocument &config, JsonObject &base,
+                                        bool &saved, String &method, String &error) {
+    if (deserializeJson(config, baseConfig_.c_str()) != DeserializationError::Ok
+        || !config.is<JsonObject>()) {
+        error = "Saved Base configuration is invalid";
+        return false;
+    }
+    base = config.as<JsonObject>();
+    saved = base.size() > 0;
+    method = base["base_setup_method"] | String();
+    if (saved && method.isEmpty()) {
+        error = "Saved Base mode is missing";
+        return false;
+    }
+    if (saved) return true;
+
+    base["base_setup_method"] = "SURVEY_IN";
+    base["survey_in_duration"] = AUTO_SURVEY_IN_SECONDS;
+    base["survey_in_accuracy"] = 5;
+    base["mode"] = "BASE";
+    JsonObject options = base.createNestedObject("gnss_options");
+    options["output_mode"] = "rtcm_only";
+    options["msm_level"] = "both";
+    method = "SURVEY_IN";
+    return true;
+}
+
 bool BackendAgent::buildStartupCommands(JsonObject base,
                                         GnssCmdBuilder::GnssSensorType detected,
                                         bool restoreFixed,
@@ -170,12 +197,12 @@ bool BackendAgent::initializeBaseAtBoot(GnssCmdBuilder::GnssSensorType detected)
         return false;
     };
     DynamicJsonDocument config(CONFIG_DOCUMENT_SIZE);
-    if (deserializeJson(config, baseConfig_.c_str()) != DeserializationError::Ok || !config.is<JsonObject>())
-        return fail("Saved Base configuration is invalid");
-    JsonObject base = config.as<JsonObject>();
-    const bool saved = base.size() > 0;
-    const String method = base["base_setup_method"] | String();
-    if (saved && method.isEmpty()) return fail("Saved Base mode is missing");
+    JsonObject base;
+    bool saved = false;
+    String method;
+    String configError;
+    if (!prepareStartupConfig(config, base, saved, method, configError))
+        return fail(configError);
     if (stationLock_.all) {
         baseStartupState_ = "locked";
         markStatusDirty();
@@ -192,15 +219,6 @@ bool BackendAgent::initializeBaseAtBoot(GnssCmdBuilder::GnssSensorType detected)
     const bool restoreFixed = method == "FIXED_LLA";
     if (!restoreFixed && !method.isEmpty() && method != "SURVEY_IN")
         return fail("Unsupported saved Base mode");
-    if (!saved) {
-        base["base_setup_method"] = "SURVEY_IN";
-        base["survey_in_duration"] = AUTO_SURVEY_IN_SECONDS;
-        base["survey_in_accuracy"] = 5;
-        base["mode"] = "BASE";
-        JsonObject options = base.createNestedObject("gnss_options");
-        options["output_mode"] = "rtcm_only";
-        options["msm_level"] = "both";
-    }
     CommandList commands;
     double fixedLatitude = 0, fixedLongitude = 0, fixedAltitude = 0;
     bool ellipsoid = false;
