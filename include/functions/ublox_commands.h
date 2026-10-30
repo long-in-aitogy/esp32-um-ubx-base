@@ -4,6 +4,7 @@
 namespace UbloxCommands {
     using GnssCmdBuilder::Command;
     using GnssCmdBuilder::CommandList;
+    using GnssCmdBuilder::GnssOptions;
 
     Command buildOutputConfigCommand(const GnssOptions &options);
     CommandList buildBaseSurveyInCommand(uint32_t duration, float accuracy, const GnssOptions &options);
