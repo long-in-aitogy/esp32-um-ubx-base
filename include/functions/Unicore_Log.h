@@ -3,30 +3,56 @@
 #include <cstdint>
 #include <cstring>
 
-// N4 MODE uses XOR including '#'; ASCII data logs use CRC32 excluding '#'.
-inline bool validUnicoreLogChecksum(const char *line, size_t length) {
-    if (!line || length < 4 || line[0] != '#') return false;
-    size_t star = length;
-    while (star > 0 && line[star - 1] != '*') --star;
-    if (star == 0) return false;
-    --star;
-    const size_t digits = length - star - 1;
-    if (digits != 2 && digits != 8) return false;
-    uint32_t expected = 0;
-    for (size_t i = star + 1; i < length; ++i) {
-        const char c = line[i];
-        const int value = c >= '0' && c <= '9' ? c - '0'
-            : c >= 'A' && c <= 'F' ? c - 'A' + 10
-            : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+namespace UnicoreLogDetail {
+
+inline size_t checksumMarker(const char *line, size_t length) {
+    size_t marker = length;
+    while (marker > 0 && line[marker - 1] != '*') --marker;
+    return marker == 0 ? length : marker - 1;
+}
+
+inline int hexValue(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+
+inline bool readExpectedChecksum(
+    const char *line, size_t marker, size_t length, uint32_t &expected) {
+    for (size_t i = marker + 1; i < length; ++i) {
+        const int value = hexValue(line[i]);
         if (value < 0) return false;
         expected = (expected << 4) | static_cast<uint32_t>(value);
     }
+    return true;
+}
+
+inline uint32_t calculateChecksum(
+    const char *line, size_t marker, size_t digits) {
     uint32_t checksum = 0;
-    for (size_t i = digits == 2 ? 0 : 1; i < star; ++i) {
+    for (size_t i = digits == 2 ? 0 : 1; i < marker; ++i) {
         checksum ^= static_cast<uint8_t>(line[i]);
-        if (digits == 8)
-            for (uint8_t bit = 0; bit < 8; ++bit)
-                checksum = (checksum >> 1) ^ (checksum & 1 ? 0xedb88320U : 0U);
+        if (digits != 8) continue;
+        for (uint8_t bit = 0; bit < 8; ++bit) {
+            checksum = (checksum >> 1)
+                ^ (checksum & 1 ? 0xedb88320U : 0U);
+        }
     }
-    return checksum == expected;
+    return checksum;
+}
+
+} // namespace UnicoreLogDetail
+
+// N4 MODE uses XOR including '#'; ASCII data logs use CRC32 excluding '#'.
+inline bool validUnicoreLogChecksum(const char *line, size_t length) {
+    if (!line || length < 4 || line[0] != '#') return false;
+    const size_t star = UnicoreLogDetail::checksumMarker(line, length);
+    if (star == length) return false;
+    const size_t digits = length - star - 1;
+    if (digits != 2 && digits != 8) return false;
+    uint32_t expected = 0;
+    if (!UnicoreLogDetail::readExpectedChecksum(line, star, length, expected))
+        return false;
+    return UnicoreLogDetail::calculateChecksum(line, star, digits) == expected;
 }
