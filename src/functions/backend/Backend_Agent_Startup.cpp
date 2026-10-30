@@ -1,7 +1,7 @@
-#include "functions/Backend_Agent.h"
-#include "Backend_Agent_Internal.h"
-#include "functions/Ublox_Readback.h"
-#include "functions/Unicore_Readback.h"
+#include "functions/backend/Backend_Agent.h"
+#include "functions/backend/Backend_Agent_Internal.h"
+#include "functions/gnss/Ublox_Readback.h"
+#include "functions/gnss/Unicore_Readback.h"
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>

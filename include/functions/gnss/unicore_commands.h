@@ -1,5 +1,5 @@
 #pragma once
-#include "functions/gnss_cmd_builder.h"
+#include "functions/gnss/gnss_cmd_builder.h"
 
 namespace UnicoreCommands {
     using namespace GnssCmdBuilder;

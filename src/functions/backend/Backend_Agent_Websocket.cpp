@@ -1,5 +1,5 @@
-#include "Backend_Agent_Websocket.h"
-#include "functions/Backend_Agent.h"
+#include "functions/backend/Backend_Agent_Websocket.h"
+#include "functions/backend/Backend_Agent.h"
 
 #include <cstring>
 #if !defined(NATIVE_BUILD)

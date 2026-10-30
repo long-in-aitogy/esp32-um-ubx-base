@@ -1,4 +1,4 @@
-#include "functions/Unicore_Log.h"
+#include "functions/gnss/Unicore_Log.h"
 
 #include <cstdint>
 
