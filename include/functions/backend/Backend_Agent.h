@@ -144,6 +144,8 @@ private:
     bool stopNtripRoverLocked();
     bool applyBaseCoordinates(double latitude, double longitude, double altitude);
     bool refreshReceiverReadback(String &error);
+    bool refreshUbloxReadback(String &error);
+    bool refreshUnicoreReadback(String &error);
     void saveSurveyResult(JsonObjectConst bestPosition, const String &mode);
     void pollGnssStatus();
     bool transformToVn2000(double latitude, double longitude, double altitude,
