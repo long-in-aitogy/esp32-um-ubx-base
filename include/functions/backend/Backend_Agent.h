@@ -146,6 +146,14 @@ private:
     bool refreshReceiverReadback(String &error);
     bool refreshUbloxReadback(String &error);
     bool refreshUnicoreReadback(String &error);
+    bool readStartupReceiverMode(GnssCmdBuilder::GnssSensorType detected, String &error);
+    bool buildStartupCommands(JsonObject base, GnssCmdBuilder::GnssSensorType detected,
+                              bool restoreFixed, GnssCmdBuilder::CommandList &commands,
+                              double &fixedLatitude, double &fixedLongitude,
+                              double &fixedAltitude, bool &ellipsoid, String &error);
+    bool verifyStartupReadback(GnssCmdBuilder::GnssSensorType detected, bool restoreFixed,
+                               double fixedLatitude, double fixedLongitude,
+                               double fixedAltitude, bool ellipsoid, String &error);
     void saveSurveyResult(JsonObjectConst bestPosition, const String &mode);
     void pollGnssStatus();
     bool transformToVn2000(double latitude, double longitude, double altitude,
