@@ -1,12 +1,11 @@
 #include "functions/Station_Lock.h"
-#include "functions/Unicore_Output.h"
+#include "functions/Unicore_Log.h"
 #include "functions/Base_Sample.h"
 #include "functions/Device_Token.h"
 #include "functions/gnss_cmd_builder.h"
 #include "functions/Ubx_Reply.h"
 #include "functions/Unicore_Reply.h"
 #include "functions/Unicore_Identification.h"
-#include "functions/Unicore_Log.h"
 #include "functions/unicore_commands.h"
 #include "functions/Ubx_Base_Status.h"
 #include <cassert>

@@ -7,7 +7,7 @@
 #include <cstring>
 
 #include "functions/MQTT_Manager.h"
-#include "functions/Unicore_Output.h"
+#include "functions/Unicore_Log.h"
 #include "functions/Unicore_Readback.h"
 
 using namespace BackendAgentInternal;
