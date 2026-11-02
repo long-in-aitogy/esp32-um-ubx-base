@@ -12,6 +12,7 @@
 #include <freertos/task.h>
 
 class BackendAgentWebsocket;
+struct GnssTelemetrySnapshot;
 
 // Device agent for backend commands, status, provisioning and base workflows.
 // Receiver coordinates come from NMEA or Unicore readback; RTCM is forwarded.
@@ -173,6 +174,24 @@ private:
 
     String buildStatusPayload();
     String buildLwtPayload() const;
+    String statusForPayload(bool anyStream, bool onDemand) const;
+    void appendStatusFields(JsonDocument &doc, const String &status,
+                            const GnssTelemetrySnapshot &gnss, uint32_t nowMs,
+                            const String &timestamp) const;
+    void appendAutoBaseProgress(JsonDocument &doc, const GnssTelemetrySnapshot &gnss,
+                                uint32_t nowMs) const;
+    void appendSystemInfo(JsonDocument &doc, uint32_t nowMs,
+                          const String &timestamp) const;
+    void appendStartupInfo(JsonObject system) const;
+    JsonObject appendSurveyInfo(JsonObject system, uint32_t nowMs) const;
+    void appendReceiverReadback(JsonObject system, JsonObject survey) const;
+    void appendResourceInfo(JsonObject system, const String &timestamp) const;
+    void appendGnssStatus(JsonDocument &doc, const GnssTelemetrySnapshot &gnss,
+                          uint32_t nowMs) const;
+    void appendNtripStatus(JsonDocument &doc, const JsonObjectConst &service,
+                           bool server1Active, bool server2Active) const;
+    void appendTransportStatus(JsonDocument &doc, const GnssTelemetrySnapshot &gnss,
+                               uint32_t nowMs, int32_t signal) const;
     String statusTopic() const;
     String rawDataTopic() const;
     String commandTopic() const;
@@ -180,6 +199,26 @@ private:
 
     void handleWebsocketText(const String &message);
     void handleCommand(const String &source, const String &message);
+    void executeCommand(const String &source, const String &command,
+                        const String &commandId, JsonDocument &doc,
+                        JsonObject payload);
+    bool executeLicenseCommand(JsonObject payload, String &error, String &detail,
+                               bool &restartAfterCommand);
+    bool executeServiceConfigCommand(JsonObject payload, String &error, String &detail);
+    bool executeRawCommand(JsonDocument &doc, JsonObject payload,
+                           String &error, String &detail);
+    bool executeAutoBaseCommand(JsonObject payload, String &error, String &detail);
+    bool executeReferenceCheckCommand(JsonObject payload, String &error, String &detail);
+    bool executeProvinceCommand(JsonObject payload, String &error, String &detail);
+    bool executeBasicCommand(const String &command, JsonObject payload,
+                            String &error, String &detail);
+    bool executeStreamCommand(JsonObject payload, String &error, String &detail);
+    bool executeBaseStatusCommand(String &error, String &detail);
+    bool executeStopWorkflowCommand(String &detail);
+    void finishCommand(const String &source, const String &command,
+                       const String &commandId, bool success,
+                       const String &error, const String &detail,
+                       bool restartAfterCommand);
     void handleControlAck(const String &source, const String &message, bool retained);
     bool applyLockCommand(JsonObjectConst payload, String &error);
     void recordCommandResult(const String &command, const String &source,
