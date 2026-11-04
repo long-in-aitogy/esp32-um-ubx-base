@@ -41,6 +41,30 @@ namespace {
     0xB5, 0x62, 0x0A, 0x04, 0x00, 0x00, 0x0E, 0x34
   };
 
+  void waitForUm980Input()
+  {
+    const unsigned long started = millis();
+    while (!Serial1.available() && millis() - started < 2000) delay(10);
+  }
+
+  void logUm980Response()
+  {
+#ifdef PROGRAM_DEBUG
+    waitForUm980Input();
+    const String response = Serial1.readStringUntil('\n');
+    Serial.println("[NMEA CMD] Response: " + response);
+#endif
+  }
+
+  inline void sendUm980Command(const char *command, size_t maxLength, bool logResponse,
+                               uint32_t pauseMs)
+  {
+    waitForUm980Input();
+    Serial1.write(command, strnlen(command, maxLength));
+    if (logResponse) logUm980Response();
+    if (pauseMs > 0) delay(pauseMs);
+  }
+
   void clearGnssInput()
   {
     while (Serial1.available() > 0) {
@@ -145,6 +169,42 @@ bool safeNtripField(const String &value) {
     return value.indexOf('\r') < 0 && value.indexOf('\n') < 0;
 }
 
+struct LegacyNtripConfig {
+    String host;
+    String mountpoint;
+    String password;
+    uint16_t port = NTRIP_CASTER_PORT;
+};
+
+LegacyNtripConfig loadLegacyNtripConfig() {
+    LegacyNtripConfig legacy;
+    prefs.begin("myPrefs", true);
+    legacy.host = prefs.getString("NTRIP_SERVER", String(NTRIP_CASTER_ADDRESS));
+    legacy.port = prefs.getUShort("NTRIP_PORT", NTRIP_CASTER_PORT);
+    legacy.mountpoint = prefs.getString("NTRIP_MPT", String(NTRIP_MOUNTPOINT));
+    legacy.password = prefs.getString("NT_AUTH_BS", String(NTRIP_AUTH_BASE_STATION));
+    prefs.end();
+    return legacy;
+}
+
+String endpointHost(JsonObjectConst service, uint8_t index) {
+    const String suffix = String(index + 1);
+    const String generic = index == 0 ? "ip" : "ip2";
+    const String fallback = index == 0 ? jsonString(service, "host", String()) : String();
+    return jsonString(service, "serverhost" + suffix,
+        jsonString(service, "server" + suffix + "_host",
+            jsonString(service, "host" + suffix,
+                jsonString(service, generic, fallback))));
+}
+
+uint16_t endpointPort(JsonObjectConst service, uint8_t index, uint16_t legacyPort) {
+    const String suffix = String(index + 1);
+    const String generic = index == 0 ? "port" : "port2";
+    const uint16_t fallback = index == 0 ? legacyPort : 2101;
+    return static_cast<uint16_t>(service["port" + suffix]
+        | (service["serverport" + suffix] | (service[generic] | fallback)));
+}
+
 String base64Encode(const String &plain) {
     static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     String encoded;
@@ -216,6 +276,49 @@ void clearEndpointState(NtripEndpoint &endpoint) {
     endpoint.lastKeepAliveMs = endpoint.windowStartedMs;
 }
 
+void normalizeEndpoint(NtripEndpoint &endpoint) {
+    while (endpoint.mountpoint.startsWith("/")) endpoint.mountpoint.remove(0, 1);
+    endpoint.enabled = endpoint.enabled && !endpoint.host.isEmpty()
+        && !endpoint.mountpoint.isEmpty() && endpoint.port > 0
+        && safeNtripField(endpoint.host) && safeNtripField(endpoint.mountpoint)
+        && safeNtripField(endpoint.username) && safeNtripField(endpoint.password);
+}
+
+void loadEndpoint(NtripEndpoint &endpoint, uint8_t index, JsonObjectConst service,
+                  bool hasServiceConfig, const LegacyNtripConfig &legacy) {
+    const String suffix = String(index + 1);
+    const String genericUser = index == 0 ? "user" : "user2";
+    const String genericPassword = index == 0 ? "password" : "password2";
+    const String genericMountpoint = index == 0 ? "mountpoint" : "mountpoint2";
+    endpoint.enabled = hasServiceConfig
+        ? jsonBool(service, "server" + suffix + "_enabled", false)
+        : index == 0 && !legacy.host.isEmpty();
+    endpoint.host = hasServiceConfig ? endpointHost(service, index)
+        : (index == 0 ? legacy.host : String());
+    endpoint.port = hasServiceConfig ? endpointPort(service, index, legacy.port)
+        : (index == 0 ? legacy.port : 2101);
+    endpoint.mountpoint = hasServiceConfig
+        ? jsonString(service, "mountpoint" + suffix,
+            jsonString(service, "mp" + suffix,
+                jsonString(service, genericMountpoint, String())))
+        : (index == 0 ? legacy.mountpoint : String());
+    endpoint.username = hasServiceConfig
+        ? jsonString(service, "username" + suffix,
+            jsonString(service, "user" + suffix,
+                jsonString(service, genericUser, "source")))
+        : "source";
+    endpoint.password = hasServiceConfig
+        ? jsonString(service, "password" + suffix,
+            jsonString(service, "pass" + suffix,
+                jsonString(service, genericPassword,
+                    index == 0 ? legacy.password : String())))
+        : (index == 0 ? legacy.password : String());
+    endpoint.version = hasServiceConfig
+        ? static_cast<uint8_t>(service["ntrip_version" + suffix] | 1)
+        : 1;
+    normalizeEndpoint(endpoint);
+}
+
 void loadEndpoints() {
     DynamicJsonDocument serviceDoc(CONFIG_DOCUMENT_SIZE);
     const String serialized = backendAgent.serviceConfigJson();
@@ -223,74 +326,10 @@ void loadEndpoints() {
         && serviceDoc.is<JsonObject>();
     const JsonObjectConst service = serviceDoc.as<JsonObjectConst>();
 
-    String legacyHost;
-    String legacyMountpoint;
-    String legacyPassword;
-    uint16_t legacyPort = NTRIP_CASTER_PORT;
-    prefs.begin("myPrefs", true);
-    legacyHost = prefs.getString("NTRIP_SERVER", String(NTRIP_CASTER_ADDRESS));
-    legacyPort = prefs.getUShort("NTRIP_PORT", NTRIP_CASTER_PORT);
-    legacyMountpoint = prefs.getString("NTRIP_MPT", String(NTRIP_MOUNTPOINT));
-    legacyPassword = prefs.getString("NT_AUTH_BS", String(NTRIP_AUTH_BASE_STATION));
-    prefs.end();
+    const LegacyNtripConfig legacy = loadLegacyNtripConfig();
 
     for (uint8_t index = 0; index < NTRIP_SERVER_COUNT; ++index) {
-        NtripEndpoint &endpoint = endpoints[index];
-        const uint8_t serverId = index + 1;
-        const String suffix = String(serverId);
-        const String enabledKey = "server" + suffix + "_enabled";
-        const String hostKey = "serverhost" + suffix;
-        const String portKey = "port" + suffix;
-        const String mountpointKey = "mountpoint" + suffix;
-        const String usernameKey = "username" + suffix;
-        const String passwordKey = "password" + suffix;
-        const String versionKey = "ntrip_version" + suffix;
-        const String genericHostKey = index == 0 ? String("ip") : String("ip2");
-        const String genericPortKey = index == 0 ? String("port") : String("port2");
-        const String genericUserKey = index == 0 ? String("user") : String("user2");
-        const String genericPasswordKey = index == 0 ? String("password") : String("password2");
-        const String genericMountpointKey = index == 0 ? String("mountpoint") : String("mountpoint2");
-
-        endpoint.enabled = hasServiceConfig
-            ? jsonBool(service, enabledKey, false)
-            : index == 0 && !legacyHost.isEmpty();
-        endpoint.host = hasServiceConfig
-            ? jsonString(service, hostKey,
-                         jsonString(service, "server" + suffix + "_host",
-                                    jsonString(service, "host" + suffix,
-                                               jsonString(service, genericHostKey,
-                                                          index == 0 ? jsonString(service, "host", String()) : String()))))
-            : (index == 0 ? legacyHost : String());
-        endpoint.port = hasServiceConfig
-            ? static_cast<uint16_t>(service[portKey.c_str()]
-                | (service[("serverport" + suffix).c_str()]
-                    | (service[genericPortKey.c_str()] | (index == 0 ? legacyPort : 2101))))
-            : (index == 0 ? legacyPort : 2101);
-        endpoint.mountpoint = hasServiceConfig
-            ? jsonString(service, mountpointKey,
-                         jsonString(service, "mp" + suffix,
-                                    jsonString(service, genericMountpointKey, String())))
-            : (index == 0 ? legacyMountpoint : String());
-        endpoint.username = hasServiceConfig
-            ? jsonString(service, usernameKey,
-                         jsonString(service, "user" + suffix,
-                                    jsonString(service, genericUserKey, "source")))
-            : "source";
-        endpoint.password = hasServiceConfig
-            ? jsonString(service, passwordKey,
-                         jsonString(service, "pass" + suffix,
-                                    jsonString(service, genericPasswordKey,
-                                               index == 0 ? legacyPassword : String())))
-            : (index == 0 ? legacyPassword : String());
-        endpoint.version = hasServiceConfig
-            ? static_cast<uint8_t>(service[versionKey.c_str()] | 1)
-            : 1;
-
-        while (endpoint.mountpoint.startsWith("/")) endpoint.mountpoint.remove(0, 1);
-        endpoint.enabled = endpoint.enabled && endpoint.host.length() > 0
-            && endpoint.mountpoint.length() > 0 && endpoint.port > 0
-            && safeNtripField(endpoint.host) && safeNtripField(endpoint.mountpoint)
-            && safeNtripField(endpoint.username) && safeNtripField(endpoint.password);
+        loadEndpoint(endpoints[index], index, service, hasServiceConfig, legacy);
     }
 }
 
@@ -433,177 +472,41 @@ Client &activeNtripClient() {
     return clientFor(0);
 }
 
+bool sendEndpointRtcm(NtripEndpoint &endpoint, Client &client, const String &rtcmData) {
+    if (rtcmData.isEmpty()) {
+        if (endpoint.version == 2 && millis() - endpoint.lastKeepAliveMs >= 10000UL) {
+            client.print("0\r\n\r\n");
+            endpoint.lastKeepAliveMs = millis();
+        }
+        return false;
+    }
+
+    const size_t payloadLength = rtcmData.length();
+    size_t sent = 0;
+    if (endpoint.version == 2) {
+        client.print(String(payloadLength, HEX) + "\r\n");
+        sent = client.write(reinterpret_cast<const uint8_t *>(rtcmData.c_str()), payloadLength);
+        client.print("\r\n");
+    } else {
+        sent = client.write(reinterpret_cast<const uint8_t *>(rtcmData.c_str()), payloadLength);
+    }
+    if (sent != payloadLength) return false;
+    endpoint.bytesInWindow += static_cast<uint32_t>(sent);
+    return true;
+}
+
 int bootstrapUM980() {
-  // Gửi lệnh ASCII cấu hình output và survey-in cho Unicore trên COM2.
-  // Nhánh khởi tạo này chỉ gửi UART và ghi log, chưa kiểm tra ACK của từng lệnh.
-  unsigned long WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-
-  Serial1.write(nmeaCmdUnlog, strnlen(nmeaCmdUnlog, 8)); // Gửi lệnh UNLOG
-
-  #ifdef PROGRAM_DEBUG
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  String nmeaResponse = Serial1.readStringUntil('\n'); // Đọc phản hồi từ GNSS
-  Serial.println("[NMEA CMD] Response: " + nmeaResponse);
-  #endif
-  delay(20);
-
-  // cài baud rate cho COM2
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  Serial1.write(rtcmSetBaudCom2, strnlen(rtcmSetBaudCom2, 21)); // Đặt baud COM2 bằng lệnh ASCII.
-
-  // thiết lập chế độ base
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  Serial1.write(nmeaCmdSetBase, strnlen(nmeaCmdSetBase, 25)); // Bắt đầu survey-in bằng lệnh ASCII.
-
-  #ifdef PROGRAM_DEBUG
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  nmeaResponse = Serial1.readStringUntil('\n'); // Đọc phản hồi từ GNSS
-  Serial.println("[NMEA CMD] Response: " + nmeaResponse);
-  #endif
-  delay(20);
-
-  // gửi rtcm 1084 ra COM2
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  Serial1.write(rtcm1084SetOutputCom2, strnlen(rtcm1084SetOutputCom2, 18)); // Gửi lệnh RTCM để thiết lập đầu ra COM2
-
-  #ifdef PROGRAM_DEBUG
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  nmeaResponse = Serial1.readStringUntil('\n'); // Đọc phản hồi từ GNSS
-  Serial.println("[NMEA CMD] Response: " + nmeaResponse);
-  #endif
-  delay(20);
-
-  // gửi rtcm 1074 ra COM2
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  Serial1.write(rtcm1074SetOutputCom2, strnlen(rtcm1074SetOutputCom2, 18)); // Gửi lệnh RTCM để thiết lập đầu ra COM2
-
-  #ifdef PROGRAM_DEBUG
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  nmeaResponse = Serial1.readStringUntil('\n'); // Đọc phản hồi từ GNSS
-  Serial.println("[NMEA CMD] Response: " + nmeaResponse);
-  #endif
-  delay(20);
-
-  // gửi rtcm 1006 ra COM2
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  Serial1.write(rtcm1006SetOutputCom2, strnlen(rtcm1006SetOutputCom2, 18)); // Gửi lệnh RTCM để thiết lập đầu ra COM2
-
-  #ifdef PROGRAM_DEBUG
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  nmeaResponse = Serial1.readStringUntil('\n'); // Đọc phản hồi từ GNSS
-  Serial.println("[NMEA CMD] Response: " + nmeaResponse);
-  #endif
-  delay(20);
-
-  // gửi rtcm 1124 ra COM2
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  Serial1.write(rtcm1124SetOutputCom2, strnlen(rtcm1124SetOutputCom2, 18)); // Gửi lệnh RTCM để thiết lập đầu ra COM2
-
-  #ifdef PROGRAM_DEBUG
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  nmeaResponse = Serial1.readStringUntil('\n'); // Đọc phản hồi từ GNSS
-  Serial.println("[NMEA CMD] Response: " + nmeaResponse);
-  #endif
-  delay(20);
-
-  // gửi rtcm 1087 ra COM2
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  Serial1.write(rtcm1087SetOutputCom2, strnlen(rtcm1087SetOutputCom2, 18)); // Gửi lệnh RTCM để thiết lập đầu ra COM2
-
-  #ifdef PROGRAM_DEBUG
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  nmeaResponse = Serial1.readStringUntil('\n'); // Đọc phản hồi từ GNSS
-  Serial.println("[NMEA CMD] Response: " + nmeaResponse);
-  #endif
-  delay(20);
-
-  // gửi rtcm 1077 ra COM2
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  Serial1.write(rtcm1077SetOutputCom2, strnlen(rtcm1077SetOutputCom2, 18)); // Gửi lệnh RTCM để thiết lập đầu ra COM2
-
-  #ifdef PROGRAM_DEBUG
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  nmeaResponse = Serial1.readStringUntil('\n'); // Đọc phản hồi từ GNSS
-  Serial.println("[NMEA CMD] Response: " + nmeaResponse);
-  #endif
-  delay(20);
-
-  // gửi rtcm 1127 ra COM2
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  Serial1.write(rtcm1127SetOutputCom2, strnlen(rtcm1127SetOutputCom2, 18)); // Gửi lệnh RTCM để thiết lập đầu ra COM2
-
-  #ifdef PROGRAM_DEBUG
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  nmeaResponse = Serial1.readStringUntil('\n'); // Đọc phản hồi từ GNSS
-  Serial.println("[NMEA CMD] Response: " + nmeaResponse);
-  #endif
-  delay(20);
-
-  #ifdef PROGRAM_DEBUG
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  nmeaResponse = Serial1.readStringUntil('\n'); // Đọc phản hồi từ GNSS
-  Serial.println("[NMEA CMD] Response: " + nmeaResponse);
-  #endif
+  sendUm980Command(nmeaCmdUnlog, 8, true, 20);
+  sendUm980Command(rtcmSetBaudCom2, 21, false, 0);
+  sendUm980Command(nmeaCmdSetBase, 25, true, 20);
+  sendUm980Command(rtcm1084SetOutputCom2, 18, true, 20);
+  sendUm980Command(rtcm1074SetOutputCom2, 18, true, 20);
+  sendUm980Command(rtcm1006SetOutputCom2, 18, true, 20);
+  sendUm980Command(rtcm1124SetOutputCom2, 18, true, 20);
+  sendUm980Command(rtcm1087SetOutputCom2, 18, true, 20);
+  sendUm980Command(rtcm1077SetOutputCom2, 18, true, 20);
+  sendUm980Command(rtcm1127SetOutputCom2, 18, true, 20);
+  logUm980Response();
   delay(20);
 
   // Send ephemeris output commands before saving the receiver configuration.
@@ -616,22 +519,7 @@ int bootstrapUM980() {
     delay(100);
   }
 
-  // lưu cấu hình
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  Serial1.write(cmdSaveConfig, strnlen(cmdSaveConfig, 13)); // Gửi lệnh lưu cấu hình
-
-  #ifdef PROGRAM_DEBUG
-  WaitStartTime = millis();
-  while (!Serial1.available() && millis() - WaitStartTime < 2000) {
-    delay(10);
-  }
-  nmeaResponse = Serial1.readStringUntil('\n'); // Đọc phản hồi từ GNSS
-  Serial.println("[NMEA CMD] Response: " + nmeaResponse);
-  #endif
-  delay(20);
+  sendUm980Command(cmdSaveConfig, 13, true, 20);
   return 0;
 }
 
@@ -742,27 +630,7 @@ int loopNTRIP(String &rtcmData) {
         }
 
         anyConnected = true;
-        if (!rtcmData.isEmpty()) {
-            const size_t payloadLength = rtcmData.length();
-            size_t sent = 0;
-            if (endpoint.version == 2) {
-                // NTRIP v2 source streams use HTTP chunk framing after the
-                // POST handshake. The payload itself remains untouched.
-                client.print(String(payloadLength, HEX) + "\r\n");
-                sent = client.write(reinterpret_cast<const uint8_t *>(rtcmData.c_str()), payloadLength);
-                client.print("\r\n");
-            } else {
-                sent = client.write(reinterpret_cast<const uint8_t *>(rtcmData.c_str()), payloadLength);
-            }
-            if (sent == payloadLength) {
-                endpoint.bytesInWindow += static_cast<uint32_t>(sent);
-                anySent = true;
-            }
-        } else if (endpoint.version == 2
-                   && millis() - endpoint.lastKeepAliveMs >= 10000UL) {
-            client.print("0\r\n\r\n");
-            endpoint.lastKeepAliveMs = millis();
-        }
+        anySent = sendEndpointRtcm(endpoint, client, rtcmData) || anySent;
         updateBps(endpoint);
     }
 
