@@ -25,14 +25,14 @@ bool query(uint8_t cls, uint8_t id, UbxReply &reply, String &error) {
     const uint8_t poll[] = {0xB5,0x62,cls,id,0,0,uint8_t(cls+id),uint8_t(4*cls+3*id)};
     Serial.printf("[GNSS][READBACK][TX] UBX %02X/%02X; baud=%lu\n", cls, id,
                   static_cast<unsigned long>(Serial1.baudRate()));
-    const bool written = Serial1.write(poll, sizeof(poll)) == sizeof(poll);
+    const auto written = Serial1.write(poll, sizeof(poll)) == sizeof(poll);
     Serial1.flush();
     const uint32_t started = millis();
-    bool matched = false;
+    auto matched = false;
     uint32_t receivedBytes = 0;
     while (written && millis() - started < 3000UL && !matched) {
         while (Serial1.available()) {
-            const uint8_t value = static_cast<uint8_t>(Serial1.read());
+            const auto value = static_cast<uint8_t>(Serial1.read());
             bufferGnssQueryByte(value);
             ++receivedBytes;
             if (reply.feed(value) && reply.frame[2] == cls && reply.frame[3] == id) {
