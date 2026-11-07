@@ -28,10 +28,9 @@ String BackendAgent::buildLwtPayload() const {
 
 String BackendAgent::statusForPayload(bool anyStream, bool onDemand) const {
     if (stationLock_.all) return "locked";
-    const auto stableState = agentState_ == "configuring" || agentState_ == "rebooting"
+    if (const auto stableState = agentState_ == "configuring" || agentState_ == "rebooting"
         || agentState_ == "rebooting_for_reset" || agentState_.startsWith("auto_setup")
-        || agentState_.startsWith("reference_check");
-    if (stableState) return agentState_;
+        || agentState_.startsWith("reference_check"); stableState) return agentState_;
     if (!licenseValid_) return "awaiting_license";
     if (!provisioned_) return "unprovisioned";
     if (onDemand && !anyStream) return "sleep";
@@ -50,9 +49,9 @@ void BackendAgent::appendStatusFields(JsonDocument &doc, const String &status,
     doc["agent_timestamp"] = timestamp.toInt();
     doc["status_boot_id"] = statusBootId_;
     doc["status_sequence"] = statusSequence_;
-    doc["rtk_fix_status"] = gnss.fixStatus;
-    doc["last_raw_gga"] = gnss.lastGga;
-    doc["last_gga_fix_status"] = gnss.fixStatus;
+    doc["rtk_fix_status"] = gnss.fixStatus.data();
+    doc["last_raw_gga"] = gnss.lastGga.data();
+    doc["last_gga_fix_status"] = gnss.fixStatus.data();
     if (gnss.lastGgaMs != 0) doc["last_raw_gga_age"] = (nowMs - gnss.lastGgaMs) / 1000.0;
     else doc["last_raw_gga_age"] = nullptr;
     doc["base_mode_active"] = baseConfig_ != "{}" && baseConfig_.length() > 2;
@@ -81,8 +80,8 @@ void BackendAgent::appendAutoBaseProgress(JsonDocument &doc,
         progress["phase"] = "unverified";
         progress["reason"] = "Ket qua cu chua duoc xac nhan RTK Fixed; can chay lai Auto Base";
     }
-    progress["last_raw_gga"] = gnss.lastGga;
-    progress["gga_fix_status"] = gnss.fixStatus;
+    progress["last_raw_gga"] = gnss.lastGga.data();
+    progress["gga_fix_status"] = gnss.fixStatus.data();
     progress["gga_age_seconds"] = doc["last_raw_gga_age"];
     progress["rtcm_bytes"] = ntripRoverBytesReceived();
     progress["rtcm_pkts"] = ntripRoverPacketsReceived();
@@ -129,13 +128,13 @@ JsonObject BackendAgent::appendSurveyInfo(JsonObject system, uint32_t nowMs) con
     if (surveyInMonitoring_) {
         if (surveyInStartedMs_ > 0)
             survey["elapsed_since_ack_seconds"] =
-                static_cast<uint32_t>(nowMs - surveyInStartedMs_) / 1000UL;
+                (nowMs - surveyInStartedMs_) / 1000UL;
         else survey["elapsed_since_ack_seconds"] = nullptr;
         survey["target_seconds"] = surveyInTargetSeconds_;
         survey["fix_status"] = surveyInReadbackReady_ ? "FIXEDPOS" : "UNVERIFIED";
         survey["source"] = sensorType_ == "Ublox" ? "NAV-SVIN" : "BESTNAV";
         survey["readback_age_seconds"] = receiverBaseReadbackMs_ > 0
-            ? static_cast<uint32_t>(nowMs - receiverBaseReadbackMs_) / 1000UL : UINT32_MAX;
+            ? (nowMs - receiverBaseReadbackMs_) / 1000UL : UINT32_MAX;
     }
     return survey;
 }
@@ -154,7 +153,7 @@ void BackendAgent::appendReceiverReadback(JsonObject system, JsonObject survey) 
                 survey["active"] = readbackDoc["active"];
             }
             readback["age_seconds"] = receiverBaseReadbackMs_ > 0
-                ? static_cast<uint32_t>(millis() - receiverBaseReadbackMs_) / 1000UL : 0;
+                ? (millis() - receiverBaseReadbackMs_) / 1000UL : 0;
         }
     }
 }
@@ -220,7 +219,7 @@ void BackendAgent::appendGnssStatus(JsonDocument &doc, const GnssTelemetrySnapsh
     position["latitude"] = gnss.latitude;
     position["longitude"] = gnss.longitude;
     position["altitude"] = gnss.altitude;
-    doc["rtk_fix_status"] = gnss.fixStatus;
+    doc["rtk_fix_status"] = gnss.fixStatus.data();
     if (gnss.satellites > 0) doc["satellite_count"] = gnss.satellites;
     if (gnss.gstHacc > 0 && gnss.lastGstMs > 0 && nowMs - gnss.lastGstMs <= 15000UL)
         doc["hacc"] = gnss.gstHacc;
